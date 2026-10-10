@@ -16,7 +16,7 @@ const months = [
 async function api(path, options = {}) {
   const token = localStorage.getItem("msk_token");
 
-  const response = await fetch(API + path, {
+ const response = await fetch(`${API_URL}/api${path}`, {
     ...options,
     headers: {
       "Content-Type": "application/json",
