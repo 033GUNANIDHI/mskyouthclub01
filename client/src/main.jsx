@@ -6,7 +6,8 @@ import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import "./styles.css";
 
-const API = "http://localhost:4000/api";
+const API_URL =
+  import.meta.env.VITE_API_URL || "http://localhost:4000";
 const months = [
   "January","February","March","April","May","June",
   "July","August","September","October","November","December"
