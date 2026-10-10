@@ -5,8 +5,7 @@ import { saveAs } from "file-saver";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import "./styles.css";
-
-const API_URL = import.meta.env.VITE_API_URL;
+const API_URL = "https://mskyouthclub01-1.onrender.com";
 const months = [
   "January","February","March","April","May","June",
   "July","August","September","October","November","December"
