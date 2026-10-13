@@ -518,7 +518,10 @@ app.get("/api/member/overview", auth("member"), async (req, res) => {
     if (expectedMonths > 240) break;
   }
 
-  const monthlyAmount = Number(req.user.monthlyAmount || 0);
+const monthlyAmount = Number(req.user.monthlyAmount || 0);
+const expectedAmount = expectedMonths * monthlyAmount;
+
+
   const paymentByMonth = new Map(payments.map(p => [`${p.year}-${p.month}`, Number(p.amount || 0)]));
   const pendingMonthList = [];
   cursorYear = startYear;
