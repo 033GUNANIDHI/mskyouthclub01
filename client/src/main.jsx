@@ -232,6 +232,27 @@ function MemberDashboard() {
         <Stat title="Monthly Amount" value={money(data.member.monthlyAmount)} />
       </div>
 
+      <div className="card">
+        <h2>Month-wise Pending Payments</h2>
+        <p>Each month stays pending until a positive payment covering the monthly amount is recorded. A ₹0 entry is treated as pending.</p>
+        <div className="table-wrap">
+          <table>
+            <thead><tr><th>Month</th><th>Year</th><th>Monthly Fee</th><th>Paid</th><th>Balance</th><th>Status</th></tr></thead>
+            <tbody>
+              {(data.pendingMonthList || []).length === 0 ? (
+                <tr><td colSpan="6">No pending months. All dues are clear.</td></tr>
+              ) : (data.pendingMonthList || []).map(item => (
+                <tr key={`${item.year}-${item.month}`}>
+                  <td>{months[item.month - 1]}</td><td>{item.year}</td>
+                  <td>{money(item.monthlyAmount)}</td><td>{money(item.paidAmount)}</td>
+                  <td>{money(item.remainingAmount)}</td><td><span className="status-pending">Pending</span></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
       <div className="stats">
         <Stat title="Club Varavu" value={money(data.totalIncome)} />
         <Stat title="Club Selavu" value={money(data.totalExpense)} />
@@ -395,6 +416,11 @@ function AdminDashboard() {
 
   const [editingIncome, setEditingIncome] = useState(null);
   const [editingExpense, setEditingExpense] = useState(null);
+  const [editingPayment, setEditingPayment] = useState(null);
+  const [historyMonth, setHistoryMonth] = useState(String(new Date().getMonth() + 1));
+  const [historyYear, setHistoryYear] = useState(String(new Date().getFullYear()));
+  const [historyPage, setHistoryPage] = useState(1);
+  const historyPageSize = 10;
 
   async function load() {
     const [s, m, p, i, e] = await Promise.all([
@@ -464,6 +490,29 @@ function AdminDashboard() {
       });
       setPaymentForm(f => ({ ...f, amount:"", note:"" }));
       setMsg("Payment recorded");
+      await load();
+      await loadMonthlyStatus();
+    } catch (e) {
+      setMsg(e.message);
+    }
+  }
+
+  async function savePayment(e) {
+    e.preventDefault();
+    try {
+      await api(`/admin/payments/${editingPayment._id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          memberId: editingPayment.memberId,
+          month: Number(editingPayment.month),
+          year: Number(editingPayment.year),
+          amount: Number(editingPayment.amount),
+          note: editingPayment.note || "",
+          paidAt: editingPayment.paidAt
+        })
+      });
+      setEditingPayment(null);
+      setMsg("Payment updated successfully");
       await load();
       await loadMonthlyStatus();
     } catch (e) {
@@ -583,7 +632,14 @@ function AdminDashboard() {
     }
   }
 
-  const paymentRows = payments.map(p => ({
+  const filteredHistoryPayments = payments.filter(p =>
+    (historyMonth === "all" || Number(p.month) === Number(historyMonth)) &&
+    (historyYear === "all" || Number(p.year) === Number(historyYear))
+  ).sort((a, b) => Number(b.year) - Number(a.year) || Number(b.month) - Number(a.month) || new Date(b.paidAt || 0) - new Date(a.paidAt || 0));
+  const historyTotalPages = Math.max(1, Math.ceil(filteredHistoryPayments.length / historyPageSize));
+  const visibleHistoryPayments = filteredHistoryPayments.slice((historyPage - 1) * historyPageSize, historyPage * historyPageSize);
+  const historyCollectionTotal = filteredHistoryPayments.reduce((sum, p) => sum + Math.max(0, Number(p.amount) || 0), 0);
+  const paymentRows = filteredHistoryPayments.map(p => ({
     Member:p.member?.name || "",
     Email:p.member?.email || "",
     Month:months[p.month-1],
@@ -802,6 +858,7 @@ function AdminDashboard() {
       )}
 
       {tab === "payments" && (
+        <>
         <div className="grid2">
           <form className="card form" onSubmit={addPayment}>
             <h2>Record Monthly Payment</h2>
@@ -818,36 +875,98 @@ function AdminDashboard() {
             <button className="primary">Mark Paid</button>
           </form>
 
-          <div className="card">
-            <div className="card-head">
-              <h2>Collection History</h2>
+          <div className="card collection-card">
+            <div className="card-head collection-head">
+              <div>
+                <h2>Collection History</h2>
+                <p>Filter collections by month and year</p>
+              </div>
               <div className="button-row">
                 <button onClick={()=>downloadExcel("msk-payments.xlsx",paymentRows)}>Excel</button>
                 <button onClick={()=>downloadPdf(
                   "MSK Youth Club - Collection Report",
                   ["Member","Month","Year","Amount","Date"],
-                  payments.map(p=>[p.member?.name || "",months[p.month-1],p.year,money(p.amount),dateText(p.paidAt)]),
+                  filteredHistoryPayments.map(p=>[p.member?.name || "",months[p.month-1],p.year,money(p.amount),dateText(p.paidAt)]),
                   "msk-collection-report.pdf"
                 )}>PDF</button>
               </div>
             </div>
 
-            <div className="table-wrap">
+            <div className="collection-filters">
+              <label>Month
+                <select value={historyMonth} onChange={e=>{setHistoryMonth(e.target.value);setHistoryPage(1);}}>
+                  <option value="all">All months</option>
+                  {months.map((m,i)=><option key={m} value={i+1}>{m}</option>)}
+                </select>
+              </label>
+              <label>Year
+                <select value={historyYear} onChange={e=>{setHistoryYear(e.target.value);setHistoryPage(1);}}>
+                  <option value="all">All years</option>
+                  {[...new Set([new Date().getFullYear(), ...payments.map(p=>Number(p.year)).filter(Boolean)])].sort((a,b)=>b-a).map(y=><option key={y} value={y}>{y}</option>)}
+                </select>
+              </label>
+              <div className="collection-total"><span>Filtered collection</span><strong>{money(historyCollectionTotal)}</strong><small>{filteredHistoryPayments.length} payment{filteredHistoryPayments.length===1?"":"s"}</small></div>
+            </div>
+
+            <div className="table-wrap collection-table-wrap">
               <table>
-                <thead><tr><th>Member</th><th>Month</th><th>Year</th><th>Amount</th><th>Date</th></tr></thead>
+                <thead><tr><th>Member</th><th>Month</th><th>Year</th><th>Amount</th><th>Date</th><th>Note</th><th>Action</th></tr></thead>
                 <tbody>
-                  {payments.map(p=><tr key={p._id}>
+                  {visibleHistoryPayments.map(p=><tr key={p._id}>
                     <td>{p.member?.name || "-"}</td>
                     <td>{months[p.month-1]}</td>
                     <td>{p.year}</td>
                     <td>{money(p.amount)}</td>
                     <td>{dateText(p.paidAt)}</td>
+                    <td>{p.note || "-"}</td>
+                    <td><button type="button" onClick={()=>setEditingPayment({
+                      _id:p._id, memberId:p.member?._id || "", month:p.month, year:p.year,
+                      amount:String(p.amount), note:p.note || "",
+                      paidAt:p.paidAt ? new Date(p.paidAt).toISOString().slice(0,10) : new Date().toISOString().slice(0,10)
+                    })}>Edit</button></td>
                   </tr>)}
+                  {filteredHistoryPayments.length === 0 && <tr><td colSpan="7" className="empty-history">No payments found for this month and year.</td></tr>}
                 </tbody>
               </table>
             </div>
+            {filteredHistoryPayments.length > 0 && <div className="history-pagination">
+              <span>Showing {(historyPage-1)*historyPageSize+1}–{Math.min(historyPage*historyPageSize,filteredHistoryPayments.length)} of {filteredHistoryPayments.length}</span>
+              <div className="button-row">
+                <button disabled={historyPage===1} onClick={()=>setHistoryPage(page=>Math.max(1,page-1))}>Previous</button>
+                <span className="page-indicator">Page {historyPage} of {historyTotalPages}</span>
+                <button disabled={historyPage>=historyTotalPages} onClick={()=>setHistoryPage(page=>Math.min(historyTotalPages,page+1))}>Next</button>
+              </div>
+            </div>}
           </div>
         </div>
+        {editingPayment && (
+          <div className="card edit-card">
+            <h2>Edit Payment</h2>
+            <form className="form" onSubmit={savePayment}>
+              <label>Member</label>
+              <select value={editingPayment.memberId} onChange={e=>setEditingPayment({...editingPayment,memberId:e.target.value})} required>
+                {members.map(m=><option key={m._id} value={m._id}>{m.name}</option>)}
+              </select>
+              <label>Month</label>
+              <select value={editingPayment.month} onChange={e=>setEditingPayment({...editingPayment,month:Number(e.target.value)})}>
+                {months.map((m,i)=><option key={m} value={i+1}>{m}</option>)}
+              </select>
+              <label>Year</label>
+              <input type="number" value={editingPayment.year} onChange={e=>setEditingPayment({...editingPayment,year:Number(e.target.value)})} required />
+              <label>Amount (enter 0 to mark as pending)</label>
+              <input type="number" min="0" value={editingPayment.amount} onChange={e=>setEditingPayment({...editingPayment,amount:e.target.value})} required />
+              <label>Paid date</label>
+              <input type="date" value={editingPayment.paidAt} onChange={e=>setEditingPayment({...editingPayment,paidAt:e.target.value})} required />
+              <label>Note</label>
+              <input value={editingPayment.note} onChange={e=>setEditingPayment({...editingPayment,note:e.target.value})} />
+              <div className="button-row">
+                <button className="primary">Save Changes</button>
+                <button type="button" onClick={()=>setEditingPayment(null)}>Cancel</button>
+              </div>
+            </form>
+          </div>
+        )}
+        </>
       )}
 
       {tab === "varavu" && (

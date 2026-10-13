@@ -61,3 +61,16 @@ expected monthly contribution from the member's join month through the current m
 ### Latest UI update
 - Added the provided MSK Youth Club logo to the login page, top navigation, and browser favicon.
 - Added a more distinctive gold/navy visual style while keeping the mobile-responsive layout.
+
+
+## Latest payment updates
+- Admin can edit an existing payment from Admin > Payments > Collection History. Member, month, year, amount, paid date and note can be updated. Setting the amount to ₹0 makes that month pending again.
+- Member dashboard includes a month-wise pending table with monthly fee, amount paid, balance and status.
+- A month with no payment or a ₹0 payment is counted as pending, including when the member's configured monthly amount is ₹0.
+
+## Deploy the update
+1. Replace the corresponding project files with these updated files and test locally.
+2. Push the changes to GitHub (`git add .`, `git commit -m "Add payment editing and month-wise pending dues"`, `git push`).
+3. Render: deploy the updated `server` service from the connected GitHub repository. No new environment variable is required.
+4. Vercel: deploy the updated frontend from the same repository (Root Directory: `client`). Keep `VITE_API_URL` set to `https://mskyouthclub01-1.onrender.com` if that is your active Render backend.
+5. Test an existing payment by editing its amount to 0, then log in as that member and verify the month appears in Month-wise Pending Payments.

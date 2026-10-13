@@ -243,6 +243,41 @@ app.post("/api/admin/payments", auth("admin"), async (req, res) => {
   }
 });
 
+
+app.patch("/api/admin/payments/:id", auth("admin"), async (req, res) => {
+  try {
+    const payment = await Payment.findById(req.params.id);
+
+    if (!payment) {
+      return res.status(404).json({
+        message: "Payment record not found"
+      });
+    }
+
+    const { memberId, month, year, amount, note, paidAt } = req.body;
+
+    if (memberId !== undefined) payment.member = memberId;
+    if (month !== undefined) payment.month = Number(month);
+    if (year !== undefined) payment.year = Number(year);
+    if (amount !== undefined) payment.amount = Number(amount);
+    if (note !== undefined) payment.note = note;
+    if (paidAt !== undefined) payment.paidAt = new Date(paidAt);
+
+    await payment.save();
+
+    res.json({
+      message: "Payment updated successfully",
+      payment
+    });
+  } catch (error) {
+    console.error("Payment update failed:", error);
+    res.status(500).json({
+      message: "Failed to update payment"
+    });
+  }
+});
+
+
 app.get("/api/admin/payments", auth("admin"), async (req, res) => {
   const payments = await Payment.find()
     .populate("member", "name email phone monthlyAmount")
@@ -279,10 +314,10 @@ app.get("/api/admin/monthly-status", auth("admin"), async (req, res) => {
     }).populate("member", "name email phone");
 
     const paidMemberIds = new Set(
-      payments.filter(p => p.member).map(p => p.member._id.toString())
+      payments.filter(p => p.member && Number(p.amount) > 0).map(p => p.member._id.toString())
     );
 
-    const paid = payments.filter(p => p.member).map(p => ({
+    const paid = payments.filter(p => p.member && Number(p.amount) > 0).map(p => ({
       id: p.member._id,
       name: p.member.name,
       email: p.member.email,
@@ -483,11 +518,31 @@ app.get("/api/member/overview", auth("member"), async (req, res) => {
     if (expectedMonths > 240) break;
   }
 
-  const expectedAmount = expectedMonths * Number(req.user.monthlyAmount || 0);
-  const pendingAmount = Math.max(expectedAmount - totalPaid, 0);
-  const pendingMonths = Number(req.user.monthlyAmount || 0) > 0
-    ? Math.max(Math.ceil(pendingAmount / Number(req.user.monthlyAmount)), 0)
-    : 0;
+  const monthlyAmount = Number(req.user.monthlyAmount || 0);
+  const paymentByMonth = new Map(payments.map(p => [`${p.year}-${p.month}`, Number(p.amount || 0)]));
+  const pendingMonthList = [];
+  cursorYear = startYear;
+  cursorMonth = startMonth;
+  let checkedMonths = 0;
+  while (cursorYear < endYear || (cursorYear === endYear && cursorMonth <= endMonth)) {
+    const key = `${cursorYear}-${cursorMonth}`;
+    const amountPaidForMonth = paymentByMonth.get(key) || 0;
+    // A zero-amount record is not a paid month. A month is pending until its monthly fee is covered.
+    if (amountPaidForMonth <= 0 || (monthlyAmount > 0 && amountPaidForMonth < monthlyAmount)) {
+      pendingMonthList.push({
+        month: cursorMonth,
+        year: cursorYear,
+        monthlyAmount,
+        paidAmount: amountPaidForMonth,
+        remainingAmount: Math.max(monthlyAmount - amountPaidForMonth, 0)
+      });
+    }
+    cursorMonth++;
+    if (cursorMonth === 13) { cursorMonth = 1; cursorYear++; }
+    if (++checkedMonths > 240) break;
+  }
+  const pendingAmount = pendingMonthList.reduce((sum, item) => sum + item.remainingAmount, 0);
+  const pendingMonths = pendingMonthList.length;
 
   res.json({
     member: safeUser(req.user),
@@ -498,6 +553,7 @@ app.get("/api/member/overview", auth("member"), async (req, res) => {
     expectedAmount,
     pendingAmount,
     pendingMonths,
+    pendingMonthList,
     clubPaymentIncome: paymentIncome,
     clubOtherIncome: otherIncome,
     totalIncome,
