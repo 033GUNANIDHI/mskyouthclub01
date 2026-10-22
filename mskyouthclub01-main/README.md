@@ -38,3 +38,11 @@ React + Vite frontend, Express API, MongoDB, JWT authentication.
 
 ## Important security note
 The original uploaded archive contained a populated `server/.env` with database credentials and authentication secrets. Those values have been removed from this package. Rotate the MongoDB database-user password and JWT/admin secrets in your hosting provider before using the updated project. Never paste production secrets into source files or commit them to GitHub.
+
+## Member permissions
+
+Admin can assign permissions independently for each member from Admin Panel → Members → Permissions:
+- **Payments:** own member payment records or all members' payment records.
+- **Varavu-Selavu:** view, add, edit, and update. Editing an existing Varavu/Selavu record requires both Edit and Update.
+
+Permissions are enforced by the API as well as reflected in the member dashboard. Existing MongoDB collections and records are not migrated, deleted, or recreated; older member documents receive safe defaults when read (own payments, finance view enabled, add/edit/update disabled). Keep the existing `MONGO_URI`/`MONGODB_URI` and JWT/admin environment settings when deploying.
