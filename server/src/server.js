@@ -8,8 +8,12 @@ import jwt from "jsonwebtoken";
 dotenv.config();
 
 const app = express();
-app.use(cors());
-app.use(express.json());
+const allowedOrigins = (process.env.CLIENT_ORIGIN || "").split(",").map(v => v.trim()).filter(Boolean);
+app.use(cors({ origin(origin, callback) {
+  if (!origin || allowedOrigins.length === 0 || allowedOrigins.includes(origin)) return callback(null, true);
+  return callback(new Error("Origin not allowed by CORS"));
+} }));
+app.use(express.json({ limit: "1mb" }));
 
 const {
   PORT = 4000,
@@ -29,6 +33,7 @@ const userSchema = new mongoose.Schema({
   role: { type: String, enum: ["admin", "member"], default: "member" },
   active: { type: Boolean, default: true },
   monthlyAmount: { type: Number, default: 0, min: 0 },
+  permissions: { type: mongoose.Schema.Types.Mixed, default: () => ({ payments: "own", varavuSelavu: { view: true, add: false, edit: false, update: false } }) },
   joinedAt: { type: Date, default: Date.now }
 }, { timestamps: true });
 
@@ -59,10 +64,26 @@ const expenseSchema = new mongoose.Schema({
   note: { type: String, default: "" }
 }, { timestamps: true });
 
+const auditSchema = new mongoose.Schema({
+  actor: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+  actorEmail: { type: String, default: "admin" },
+  action: { type: String, required: true },
+  entity: { type: String, default: "" },
+  entityId: { type: String, default: "" },
+  details: { type: String, default: "" }
+}, { timestamps: true });
+auditSchema.index({ createdAt: -1 });
+
 const User = mongoose.model("User", userSchema);
 const Payment = mongoose.model("Payment", paymentSchema);
 const Income = mongoose.model("Income", incomeSchema);
 const Expense = mongoose.model("Expense", expenseSchema);
+const AuditLog = mongoose.model("AuditLog", auditSchema);
+
+async function writeAudit(req, action, entity, entityId = "", details = "") {
+  try { await AuditLog.create({ actor: req.user?._id, actorEmail: req.user?.email || "admin", action, entity, entityId: String(entityId || ""), details: String(details || "").slice(0, 500) }); }
+  catch (error) { console.error("Audit log write failed:", error.message); }
+}
 
 function tokenFor(user) {
   return jwt.sign(
@@ -81,6 +102,7 @@ function safeUser(user) {
     role: user.role,
     active: user.active,
     monthlyAmount: user.monthlyAmount || 0,
+    permissions: user.permissions || { payments: "own", varavuSelavu: { view: true, add: false, edit: false, update: false } },
     joinedAt: user.joinedAt
   };
 }
@@ -136,6 +158,17 @@ app.get("/api/me", auth(), async (req, res) => {
   res.json({ user: safeUser(req.user) });
 });
 
+
+function can(req, key) {
+  const p = req.user?.permissions || {};
+  if (key === "paymentsAll") return p.payments === "all";
+  const finance = p.varavuSelavu || {};
+  return finance[key] === true;
+}
+function requirePermission(key) {
+  return (req, res, next) => can(req, key) ? next() : res.status(403).json({ message: "Permission denied by admin" });
+}
+
 // ADMIN MEMBERS
 app.get("/api/admin/members", auth("admin"), async (req, res) => {
   const members = await User.find({ role: "member" })
@@ -169,6 +202,7 @@ app.post("/api/admin/members", auth("admin"), async (req, res) => {
       monthlyAmount: Number(monthlyAmount || 0)
     });
 
+    await writeAudit(req, "MEMBER_CREATED", "Member", member._id, `Created member ${member.name}`);
     res.status(201).json({
       message: "Member created",
       member: safeUser(member)
@@ -193,10 +227,29 @@ app.patch("/api/admin/members/:id", auth("admin"), async (req, res) => {
     if (password) member.password = await bcrypt.hash(password, 10);
 
     await member.save();
+    await writeAudit(req, "MEMBER_UPDATED", "Member", member._id, `Updated member ${member.name}`);
     res.json({ message: "Member updated", member: safeUser(member) });
   } catch (e) {
     res.status(500).json({ message: e.message });
   }
+});
+
+app.patch("/api/admin/members/:id/permissions", auth("admin"), async (req, res) => {
+  const member = await User.findOne({ _id: req.params.id, role: "member" });
+  if (!member) return res.status(404).json({ message: "Member not found" });
+  const incoming = req.body.permissions || {};
+  member.permissions = {
+    payments: ["none", "own", "all"].includes(incoming.payments) ? incoming.payments : "own",
+    varavuSelavu: {
+      view: Boolean(incoming.varavuSelavu?.view),
+      add: Boolean(incoming.varavuSelavu?.add),
+      edit: Boolean(incoming.varavuSelavu?.edit),
+      update: Boolean(incoming.varavuSelavu?.update)
+    }
+  };
+  await member.save();
+  await writeAudit(req, "MEMBER_PERMISSIONS_UPDATED", "Member", member._id, `Permissions updated for ${member.name}`);
+  res.json({ message: "Permissions updated", member: safeUser(member) });
 });
 
 app.patch("/api/admin/members/:id/status", auth("admin"), async (req, res) => {
@@ -205,20 +258,18 @@ app.patch("/api/admin/members/:id/status", auth("admin"), async (req, res) => {
 
   member.active = Boolean(req.body.active);
   await member.save();
+  await writeAudit(req, member.active ? "MEMBER_ACTIVATED" : "MEMBER_DEACTIVATED", "Member", member._id, `${member.name} active=${member.active}`);
 
   res.json({ message: "Member status updated", member: safeUser(member) });
 });
 
 app.delete("/api/admin/members/:id", auth("admin"), async (req, res) => {
-  const member = await User.findOneAndDelete({
-    _id: req.params.id,
-    role: "member"
-  });
-
+  const member = await User.findOne({ _id: req.params.id, role: "member" });
   if (!member) return res.status(404).json({ message: "Member not found" });
-
-  await Payment.deleteMany({ member: member._id });
-  res.json({ message: "Member deleted" });
+  member.active = false;
+  await member.save();
+  await writeAudit(req, "MEMBER_ARCHIVED", "Member", member._id, `Archived ${member.name}; payment history preserved`);
+  res.json({ message: "Member archived; payment history preserved", member: safeUser(member) });
 });
 
 // MONTHLY PAYMENTS
@@ -232,6 +283,7 @@ app.post("/api/admin/payments", auth("admin"), async (req, res) => {
       note: req.body.note || ""
     });
 
+    await writeAudit(req, "PAYMENT_CREATED", "Payment", payment._id, `${payment.month}/${payment.year} amount ₹${payment.amount}`);
     res.status(201).json(payment);
   } catch (e) {
     if (e.code === 11000) {
@@ -264,6 +316,7 @@ app.patch("/api/admin/payments/:id", auth("admin"), async (req, res) => {
     if (paidAt !== undefined) payment.paidAt = new Date(paidAt);
 
     await payment.save();
+    await writeAudit(req, "PAYMENT_UPDATED", "Payment", payment._id, `${payment.month}/${payment.year} amount ₹${payment.amount}`);
 
     res.json({
       message: "Payment updated successfully",
@@ -287,7 +340,7 @@ app.get("/api/admin/payments", auth("admin"), async (req, res) => {
 });
 
 app.get("/api/member/payments", auth("member"), async (req, res) => {
-  const payments = await Payment.find({ member: req.user._id })
+  const payments = await Payment.find(req.user.permissions?.payments === "all" ? {} : { member: req.user._id })
     .sort({ year: -1, month: -1 });
 
   res.json(payments);
@@ -308,37 +361,25 @@ app.get("/api/admin/monthly-status", auth("admin"), async (req, res) => {
       active: true
     }).select("-password");
 
-    const payments = await Payment.find({
-      month,
-      year
-    }).populate("member", "name email phone");
+    const payments = await Payment.find({ month, year }).populate("member", "name email phone monthlyAmount");
+    const paymentByMember = new Map(payments.filter(p => p.member).map(p => [p.member._id.toString(), p]));
+    const paid = [];
+    const pending = [];
 
-    const paidMemberIds = new Set(
-      payments.filter(p => p.member && Number(p.amount) > 0).map(p => p.member._id.toString())
-    );
+    for (const member of members) {
+      const payment = paymentByMember.get(member._id.toString());
+      const monthlyAmount = Number(member.monthlyAmount || 0);
+      const amountPaid = Math.max(0, Number(payment?.amount || 0));
+      const isPaid = payment && amountPaid > 0 && (monthlyAmount === 0 || amountPaid >= monthlyAmount);
+      if (isPaid) {
+        paid.push({ id: member._id, name: member.name, email: member.email, phone: member.phone, amount: amountPaid, paidAt: payment.paidAt, note: payment.note });
+      } else {
+        pending.push({ id: member._id, name: member.name, email: member.email, phone: member.phone, monthlyAmount, paidAmount: amountPaid, remainingAmount: Math.max(0, monthlyAmount - amountPaid) });
+      }
+    }
 
-    const paid = payments.filter(p => p.member && Number(p.amount) > 0).map(p => ({
-      id: p.member._id,
-      name: p.member.name,
-      email: p.member.email,
-      phone: p.member.phone,
-      amount: p.amount,
-      paidAt: p.paidAt,
-      note: p.note
-    }));
-
-    const pending = members
-      .filter(m => !paidMemberIds.has(m._id.toString()))
-      .map(m => ({
-        id: m._id,
-        name: m.name,
-        email: m.email,
-        phone: m.phone,
-        monthlyAmount: m.monthlyAmount || 0
-      }));
-
-    const totalPaidAmount = paid.reduce((sum, p) => sum + Number(p.amount || 0), 0);
-    const pendingAmount = pending.reduce((sum, p) => sum + Number(p.monthlyAmount || 0), 0);
+    const totalPaidAmount = payments.reduce((sum, p) => sum + Math.max(0, Number(p.amount || 0)), 0);
+    const pendingAmount = pending.reduce((sum, p) => sum + Number(p.remainingAmount || 0), 0);
 
     res.json({
       month,
@@ -367,6 +408,7 @@ app.post("/api/admin/incomes", auth("admin"), async (req, res) => {
       note: req.body.note || ""
     });
 
+    await writeAudit(req, "INCOME_CREATED", "Income", income._id, `${income.title}: ₹${income.amount}`);
     res.status(201).json(income);
   } catch (e) {
     res.status(500).json({ message: e.message });
@@ -390,6 +432,7 @@ app.patch("/api/admin/incomes/:id", auth("admin"), async (req, res) => {
     income.note = req.body.note || "";
 
     await income.save();
+    await writeAudit(req, "INCOME_UPDATED", "Income", income._id, `${income.title}: ₹${income.amount}`);
     res.json({ message: "Income updated", income });
   } catch (e) {
     res.status(500).json({ message: e.message });
@@ -399,6 +442,7 @@ app.patch("/api/admin/incomes/:id", auth("admin"), async (req, res) => {
 app.delete("/api/admin/incomes/:id", auth("admin"), async (req, res) => {
   const income = await Income.findByIdAndDelete(req.params.id);
   if (!income) return res.status(404).json({ message: "Income not found" });
+  await writeAudit(req, "INCOME_DELETED", "Income", income._id, `${income.title}: ₹${income.amount}`);
   res.json({ message: "Income deleted" });
 });
 
@@ -413,6 +457,7 @@ app.post("/api/admin/expenses", auth("admin"), async (req, res) => {
       note: req.body.note || ""
     });
 
+    await writeAudit(req, "EXPENSE_CREATED", "Expense", expense._id, `${expense.title}: ₹${expense.amount}`);
     res.status(201).json(expense);
   } catch (e) {
     res.status(500).json({ message: e.message });
@@ -436,6 +481,7 @@ app.patch("/api/admin/expenses/:id", auth("admin"), async (req, res) => {
     expense.note = req.body.note || "";
 
     await expense.save();
+    await writeAudit(req, "EXPENSE_UPDATED", "Expense", expense._id, `${expense.title}: ₹${expense.amount}`);
     res.json({ message: "Expense updated", expense });
   } catch (e) {
     res.status(500).json({ message: e.message });
@@ -445,6 +491,7 @@ app.patch("/api/admin/expenses/:id", auth("admin"), async (req, res) => {
 app.delete("/api/admin/expenses/:id", auth("admin"), async (req, res) => {
   const expense = await Expense.findByIdAndDelete(req.params.id);
   if (!expense) return res.status(404).json({ message: "Expense not found" });
+  await writeAudit(req, "EXPENSE_DELETED", "Expense", expense._id, `${expense.title}: ₹${expense.amount}`);
   res.json({ message: "Expense deleted" });
 });
 
@@ -476,21 +523,22 @@ app.get("/api/admin/summary", auth("admin"), async (req, res) => {
 // MEMBER OVERVIEW
 app.get("/api/member/overview", auth("member"), async (req, res) => {
   const [payments, incomes, expenses] = await Promise.all([
-    Payment.find({ member: req.user._id }).sort({ year: -1, month: -1 }),
-    Income.find().sort({ date: -1, createdAt: -1 }),
-    Expense.find().sort({ date: -1, createdAt: -1 })
+    req.user.permissions?.payments === "none" ? Promise.resolve([]) : Payment.find(req.user.permissions?.payments === "all" ? {} : { member: req.user._id }).sort({ year: -1, month: -1 }),
+    (req.user.permissions?.varavuSelavu?.view ? Income.find() : Income.find({ _id: { $exists: false } })).sort({ date: -1, createdAt: -1 }),
+    (req.user.permissions?.varavuSelavu?.view ? Expense.find() : Expense.find({ _id: { $exists: false } })).sort({ date: -1, createdAt: -1 })
   ]);
 
   const totalPaid = payments.reduce((s, p) => s + Number(p.amount || 0), 0);
-  const clubPaymentIncome = await Payment.aggregate([
+  const clubPaymentIncome = req.user.permissions?.payments === "all" ? await Payment.aggregate([
     { $group: { _id: null, total: { $sum: "$amount" } } }
-  ]);
+  ]) : [];
 
-  const paymentIncome = clubPaymentIncome[0]?.total || 0;
+  const paymentIncome = req.user.permissions?.payments === "none" ? 0 : (req.user.permissions?.payments === "all" ? (clubPaymentIncome[0]?.total || 0) : totalPaid);
   const otherIncome = incomes.reduce((s, i) => s + Number(i.amount || 0), 0);
-  const totalIncome = paymentIncome + otherIncome;
-  const totalExpense = expenses.reduce((s, e) => s + Number(e.amount || 0), 0);
-  const clubBalance = totalIncome - totalExpense;
+  const canViewFinance = Boolean(req.user.permissions?.varavuSelavu?.view);
+  const totalIncome = canViewFinance ? paymentIncome + otherIncome : 0;
+  const totalExpense = canViewFinance ? expenses.reduce((s, e) => s + Number(e.amount || 0), 0) : 0;
+  const clubBalance = canViewFinance ? totalIncome - totalExpense : 0;
 
   // Calculate dues from the member's join month through current month.
   // Existing future-dated records are not counted.
@@ -565,6 +613,30 @@ const expectedAmount = expectedMonths * monthlyAmount;
   });
 });
 
+// MEMBER VARAVU-SE LAVU ACTIONS (permission checked server-side)
+app.post("/api/member/incomes", auth("member"), requirePermission("add"), async (req, res) => {
+  try { const item = await Income.create({ title: req.body.title, amount: Number(req.body.amount), category: req.body.category || "General", date: req.body.date || new Date(), note: req.body.note || "" }); await writeAudit(req, "MEMBER_INCOME_CREATED", "Income", item._id, item.title); res.status(201).json(item); }
+  catch (e) { res.status(400).json({ message: e.message }); }
+});
+app.patch("/api/member/incomes/:id", auth("member"), (req, res, next) => can(req, "edit") || can(req, "update") ? next() : res.status(403).json({ message: "Permission denied by admin" }), async (req, res) => {
+  try { const item = await Income.findById(req.params.id); if (!item) return res.status(404).json({ message: "Income not found" }); if (req.body.title !== undefined) item.title = req.body.title; if (req.body.amount !== undefined) item.amount = Number(req.body.amount); if (req.body.category !== undefined) item.category = req.body.category; if (req.body.date !== undefined) item.date = req.body.date; if (req.body.note !== undefined) item.note = req.body.note; await item.save(); await writeAudit(req, "MEMBER_INCOME_UPDATED", "Income", item._id, item.title); res.json(item); }
+  catch (e) { res.status(400).json({ message: e.message }); }
+});
+app.post("/api/member/expenses", auth("member"), requirePermission("add"), async (req, res) => {
+  try { const item = await Expense.create({ title: req.body.title, amount: Number(req.body.amount), category: req.body.category || "General", date: req.body.date || new Date(), note: req.body.note || "" }); await writeAudit(req, "MEMBER_EXPENSE_CREATED", "Expense", item._id, item.title); res.status(201).json(item); }
+  catch (e) { res.status(400).json({ message: e.message }); }
+});
+app.patch("/api/member/expenses/:id", auth("member"), (req, res, next) => can(req, "edit") || can(req, "update") ? next() : res.status(403).json({ message: "Permission denied by admin" }), async (req, res) => {
+  try { const item = await Expense.findById(req.params.id); if (!item) return res.status(404).json({ message: "Expense not found" }); if (req.body.title !== undefined) item.title = req.body.title; if (req.body.amount !== undefined) item.amount = Number(req.body.amount); if (req.body.category !== undefined) item.category = req.body.category; if (req.body.date !== undefined) item.date = req.body.date; if (req.body.note !== undefined) item.note = req.body.note; await item.save(); await writeAudit(req, "MEMBER_EXPENSE_UPDATED", "Expense", item._id, item.title); res.json(item); }
+  catch (e) { res.status(400).json({ message: e.message }); }
+});
+
+// ADMIN AUDIT HISTORY
+app.get("/api/admin/audit", auth("admin"), async (req, res) => {
+  const logs = await AuditLog.find().sort({ createdAt: -1 }).limit(250).lean();
+  res.json(logs);
+});
+
 // ADMIN REPORT DATA
 app.get("/api/admin/finance", auth("admin"), async (req, res) => {
   const [incomes, expenses] = await Promise.all([
@@ -595,6 +667,11 @@ async function ensureAdmin() {
 
     console.log("Admin account created:", email);
   }
+}
+
+if (!JWT_SECRET || JWT_SECRET.length < 32) {
+  console.error("JWT_SECRET must be configured with at least 32 characters in server/.env");
+  process.exit(1);
 }
 
 const mongoUri = MONGO_URI || MONGODB_URI || MONGO_URL;

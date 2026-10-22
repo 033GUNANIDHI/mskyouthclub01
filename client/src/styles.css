@@ -256,3 +256,45 @@ tbody tr:hover { background: #f6fbfb; }
   .login-card { border-radius: 21px; }
   .login-page::before { width: 280px; height: 280px; right: -150px; }
 }
+
+
+/* Feature additions: accessible search, finance visualization, and refined motion */
+.member-search { margin: 0 0 14px; max-width: 520px; }
+.chart-card { animation: msk-rise-in .45s ease both; }
+.chart-row { display: grid; grid-template-columns: minmax(150px, 1fr) minmax(120px, 2fr); align-items: center; gap: 18px; margin: 18px 0; }
+.chart-row > div:first-child { display:flex; justify-content:space-between; align-items:center; gap:12px; color:var(--msk-muted); font-size:13px; }
+.chart-row strong { color:var(--msk-navy); white-space:nowrap; }
+.chart-track { height: 12px; background:#e9eff4; border-radius:999px; overflow:hidden; }
+.chart-fill { height:100%; border-radius:inherit; transform-origin:left; animation:msk-bar-grow .8s cubic-bezier(.2,.7,.2,1) both; }
+.chart-fill.teal { background:linear-gradient(90deg,#087f8c,#36b7ad); }
+.chart-fill.gold { background:linear-gradient(90deg,#b8860b,#f2d27a); }
+.chart-fill.coral { background:linear-gradient(90deg,#d45b54,#f2a08a); }
+.chart-fill.navy { background:linear-gradient(90deg,#14243b,#45698b); }
+@keyframes msk-bar-grow { from { width:0; } }
+@keyframes msk-fade-up { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
+.card, .stat { animation:msk-fade-up .35s ease both; }
+.tabs button { transition:transform .18s ease, background .18s ease, color .18s ease; }
+.tabs button:focus-visible { outline:3px solid rgba(8,127,140,.28); outline-offset:2px; }
+@media(max-width:650px) { .chart-row { grid-template-columns:1fr; gap:8px; } .chart-row > div:first-child { align-items:flex-start; } }
+@media(prefers-reduced-motion:reduce) { .chart-fill,.chart-card,.card,.stat { animation:none !important; } }
+.permission-editor { min-width: 150px; display: flex; flex-direction: column; align-items: flex-start; gap: 5px; font-size: 12px; }
+.permission-editor label { display: flex; align-items: center; gap: 5px; white-space: nowrap; }
+.permission-editor select { max-width: 130px; padding: 4px; }
+.permission-editor button { font-size: 11px; padding: 6px 8px; }
+
+
+/* Compact member-permissions dialog */
+.permission-open { padding: 7px 11px; font-size: 12px; background: #e0f2fe; color: #075985; border: 1px solid #bae6fd; white-space: nowrap; }
+.permission-modal-backdrop { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; padding: 16px; background: rgba(15,23,42,.55); backdrop-filter: blur(4px); }
+.permission-modal { width: min(460px, 100%); max-height: min(90vh, 680px); overflow: auto; background: #fff; border-radius: 18px; padding: 22px; box-shadow: 0 24px 80px rgba(0,0,0,.28); }
+.permission-modal-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 20px; }
+.permission-modal-head h2 { margin: 0 0 5px; font-size: 20px; }
+.permission-modal-head p { margin: 0; color: #64748b; font-size: 12px; overflow-wrap: anywhere; }
+.permission-close { padding: 6px 10px; background: #f1f5f9; }
+.permission-payment-select { display: flex; flex-direction: column; gap: 7px; font-size: 13px; font-weight: 650; }
+.permission-modal h3 { margin: 20px 0 10px; font-size: 15px; }
+.permission-check-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.permission-check-grid label { display: flex; align-items: center; gap: 8px; padding: 10px; border: 1px solid #e2e8f0; border-radius: 10px; font-size: 13px; }
+.permission-check-grid input { width: auto; margin: 0; accent-color: #087f8c; }
+.permission-modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 22px; }
+@media(max-width:420px) { .permission-modal { padding: 17px; } .permission-check-grid { grid-template-columns: 1fr; } }

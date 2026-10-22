@@ -1,0 +1,1297 @@
+  import React, { useEffect, useState } from "react";
+  import { createRoot } from "react-dom/client";
+  import * as XLSX from "xlsx";
+  import { saveAs } from "file-saver";
+  import jsPDF from "jspdf";
+  import autoTable from "jspdf-autotable";
+  import "./styles.css";
+  const API_URL = (import.meta.env.VITE_API_URL || "http://localhost:4000").replace(/\/$/, "");
+  const months = [
+    "January","February","March","April","May","June",
+    "July","August","September","October","November","December"
+  ];
+
+  async function api(path, options = {}) {
+    const token = localStorage.getItem("msk_token");
+
+  const response = await fetch(`${API_URL}/api${path}`, {
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(options.headers || {})
+      }
+    });
+
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      throw new Error(data.message || "Request failed");
+    }
+
+    return data;
+  }
+
+  function money(value) {
+    return `₹${Number(value || 0).toLocaleString("en-IN")}`;
+  }
+
+  function dateText(value) {
+    return value ? new Date(value).toLocaleDateString("en-IN") : "-";
+  }
+
+  function downloadExcel(filename, rows) {
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "MSK Youth Club");
+    const output = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+
+    saveAs(
+      new Blob([output], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      }),
+      filename
+    );
+  }
+
+  function downloadPdf(title, columns, rows, filename) {
+    const doc = new jsPDF();
+    doc.setFontSize(17);
+    doc.text(title, 14, 18);
+    autoTable(doc, {
+      startY: 26,
+      head: [columns],
+      body: rows,
+      styles: { fontSize: 8 }
+    });
+    doc.save(filename);
+  }
+
+  function Login({ onLogin }) {
+    const [form, setForm] = useState({ email: "", password: "" });
+    const [error, setError] = useState("");
+    const [loading, setLoading] = useState(false);
+
+    async function submit(e) {
+      // Form onSubmit handles both clicking Login and pressing Enter.
+      e.preventDefault();
+      if (loading) return;
+
+      setError("");
+      setLoading(true);
+
+      try {
+        const email = form.email.trim().toLowerCase();
+        const password = form.password;
+        const data = await api("/auth/login", {
+          method: "POST",
+          body: JSON.stringify({ email, password })
+        });
+
+        if (!data?.token || !data?.user) {
+          throw new Error("Login response is incomplete. Please try again.");
+        }
+
+        localStorage.setItem("msk_token", data.token);
+        localStorage.setItem("msk_user", JSON.stringify(data.user));
+        onLogin(data.user);
+      } catch (err) {
+        const message = err?.message || "Unable to log in. Please try again.";
+        setError(message === "Failed to fetch"
+          ? "Server-ai connect panna mudiyavillai. Internet connection-um backend API status-um check pannunga."
+          : message);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    return (
+      <div className="login-page">
+        <form className="login-card" onSubmit={submit}>
+          <img className="brand-logo login-logo" src="/msk-logo.jfif" alt="MSK Youth Club Logo" />
+          <h1>MSK Youth Club</h1>
+          <p>Member & Admin Login</p>
+
+          {error && <div className="error" role="alert">{error}</div>}
+
+          <input
+            placeholder="Email"
+            aria-label="Email"
+            type="email"
+            name="email"
+            autoComplete="username"
+            value={form.email}
+            onChange={e => setForm({ ...form, email: e.target.value })}
+            required
+            disabled={loading}
+          />
+
+          <input
+            placeholder="Password"
+            aria-label="Password"
+            type="password"
+            name="password"
+            autoComplete="current-password"
+            value={form.password}
+            onChange={e => setForm({ ...form, password: e.target.value })}
+            required
+            disabled={loading}
+          />
+
+          <button className="primary full" type="submit" disabled={loading} aria-busy={loading}>
+            {loading ? "Logging in..." : "Login"}
+          </button>
+        </form>
+      </div>
+    );
+  }
+
+  function Layout({ user, onLogout, children }) {
+    return (
+      <>
+        <header className="topbar">
+          <div className="brand">
+            <img className="brand-logo top-logo" src="/msk-logo.jfif" alt="MSK Youth Club Logo" />
+            <div className="brand-text">
+              <strong>MSK Youth Club</strong>
+              <span className="role">
+                {user.role === "admin" ? "ADMIN" : "MEMBER"}
+              </span>
+            </div>
+          </div>
+          <button onClick={onLogout} className="logout">Logout</button>
+        </header>
+        <main className="container">{children}</main>
+      </>
+    );
+  }
+
+  function Stat({ title, value }) {
+    return (
+      <div className="stat">
+        <small>{title}</small>
+        <strong>{value}</strong>
+      </div>
+    );
+  }
+
+  function MemberDashboard() {
+    const [data, setData] = useState(null);
+    const [error, setError] = useState("");
+    const [financeEditor, setFinanceEditor] = useState(null);
+    const [financeForm, setFinanceForm] = useState({ title: "", amount: "", category: "General", date: new Date().toISOString().slice(0, 10), note: "" });
+    const [financeMessage, setFinanceMessage] = useState("");
+
+    async function load() {
+      try {
+        setData(await api("/member/overview"));
+      } catch (e) {
+        setError(e.message);
+      }
+    }
+
+    useEffect(() => {
+      load();
+    }, []);
+
+    function openFinanceEditor(type, item = null) {
+      setFinanceEditor({ type, id: item?._id || null });
+      setFinanceForm({ title: item?.title || "", amount: item ? String(item.amount) : "", category: item?.category || "General", date: item?.date ? new Date(item.date).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10), note: item?.note || "" });
+      setFinanceMessage("");
+    }
+
+    async function saveFinance(e) {
+      e.preventDefault();
+      if (!financeEditor) return;
+      const route = financeEditor.type === "varavu" ? "incomes" : "expenses";
+      try {
+        await api(`/member/${route}${financeEditor.id ? `/${financeEditor.id}` : ""}`, { method: financeEditor.id ? "PATCH" : "POST", body: JSON.stringify({ ...financeForm, amount: Number(financeForm.amount) }) });
+        setFinanceEditor(null);
+        setFinanceMessage("Finance entry saved successfully.");
+        await load();
+      } catch (e) { setFinanceMessage(e.message); }
+    }
+
+    if (error) return <div className="error">{error}</div>;
+    if (!data) return <p>Loading...</p>;
+
+    const paymentRows = data.payments.map(p => ({
+      Month: months[p.month - 1],
+      Year: p.year,
+      Amount: p.amount,
+      "Paid Date": dateText(p.paidAt),
+      Note: p.note || ""
+    }));
+
+    const financeRows = [
+      ...data.incomes.map(i => ({
+        Type: "Varavu",
+        Title: i.title,
+        Category: i.category,
+        Amount: i.amount,
+        Date: dateText(i.date),
+        Note: i.note || ""
+      })),
+      ...data.expenses.map(e => ({
+        Type: "Selavu",
+        Title: e.title,
+        Category: e.category,
+        Amount: e.amount,
+        Date: dateText(e.date),
+        Note: e.note || ""
+      }))
+    ];
+
+    return (
+      <section>
+        <div className="page-title">
+          <div>
+            <h1>Welcome, {data.member.name}</h1>
+            <p>Your MSK Youth Club overview</p>
+          </div>
+
+          <div className="download-actions">
+            <button onClick={() => downloadExcel("my-payments.xlsx", paymentRows)}>
+              📗 Payment Excel
+            </button>
+            <button onClick={() =>
+              downloadPdf(
+                "MSK Youth Club - My Payment Report",
+                ["Month","Year","Amount","Paid Date"],
+                data.payments.map(p => [
+                  months[p.month - 1],
+                  p.year,
+                  money(p.amount),
+                  dateText(p.paidAt)
+                ]),
+                "my-payment-report.pdf"
+              )
+            }>
+              📄 Payment PDF
+            </button>
+          </div>
+        </div>
+
+        <div className="stats">
+          <Stat title="My Total Paid" value={money(data.totalPaid)} />
+          <Stat title="My Pending" value={money(data.pendingAmount)} />
+          <Stat title="Pending Months" value={data.pendingMonths} />
+          <Stat title="Monthly Amount" value={money(data.member.monthlyAmount)} />
+        </div>
+
+        <div className="card">
+          <h2>Month-wise Pending Payments</h2>
+          <p>Each month stays pending until a positive payment covering the monthly amount is recorded. A ₹0 entry is treated as pending.</p>
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th>Month</th><th>Year</th><th>Monthly Fee</th><th>Paid</th><th>Balance</th><th>Status</th></tr></thead>
+              <tbody>
+                {(data.pendingMonthList || []).length === 0 ? (
+                  <tr><td colSpan="6">No pending months. All dues are clear.</td></tr>
+                ) : (data.pendingMonthList || []).map(item => (
+                  <tr key={`${item.year}-${item.month}`}>
+                    <td>{months[item.month - 1]}</td><td>{item.year}</td>
+                    <td>{money(item.monthlyAmount)}</td><td>{money(item.paidAmount)}</td>
+                    <td>{money(item.remainingAmount)}</td><td><span className="status-pending">Pending</span></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {data.member.permissions?.varavuSelavu?.view && <div className="stats">
+          <Stat title="Club Varavu" value={money(data.totalIncome)} />
+          <Stat title="Club Selavu" value={money(data.totalExpense)} />
+          <Stat title="Club Balance" value={money(data.clubBalance)} />
+          <Stat title="Club Payment Collection" value={money(data.clubPaymentIncome)} />
+        </div>}
+
+        <div className="card">
+          <h2>{data.member.permissions?.payments === "all" ? "All Members Payment History" : "My Payment History"}</h2>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Month</th>
+                  <th>Year</th>
+                  <th>Amount</th>
+                  <th>Paid Date</th>
+                  <th>Note</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.payments.length === 0 ? (
+                  <tr><td colSpan="5">No payments recorded.</td></tr>
+                ) : (
+                  data.payments.map(p => (
+                    <tr key={p._id}>
+                      <td>{months[p.month - 1]}</td>
+                      <td>{p.year}</td>
+                      <td>{money(p.amount)}</td>
+                      <td>{dateText(p.paidAt)}</td>
+                      <td>{p.note || "-"}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {data.member.permissions?.varavuSelavu?.view && <div className="finance-grid">
+          <div className="card">
+            <div className="card-head">
+              <div>
+                <h2>💰 Club Varavu</h2>
+                <p>Income entries visible to members</p>
+              </div>
+              <div className="button-row">
+              {data.member.permissions?.varavuSelavu?.add && <button type="button" onClick={() => openFinanceEditor("varavu")}>+ Add Varavu</button>}
+              <button onClick={() => downloadExcel("club-varavu.xlsx", data.incomes.map(i => ({
+                Title: i.title, Category: i.category, Amount: i.amount,
+                Date: dateText(i.date), Note: i.note || ""
+              })))}>
+                Excel
+              </button>
+              </div>
+            </div>
+
+            <div className="table-wrap">
+              <table>
+                <thead><tr><th>Title</th><th>Category</th><th>Amount</th><th>Date</th>{(data.member.permissions?.varavuSelavu?.edit || data.member.permissions?.varavuSelavu?.update) && <th>Actions</th>}</tr></thead>
+                <tbody>
+                  {data.incomes.length === 0 ? (
+                    <tr><td colSpan="4">No income entries.</td></tr>
+                  ) : data.incomes.map(i => (
+                    <tr key={i._id}>
+                      <td>{i.title}</td>
+                      <td>{i.category}</td>
+                      <td>{money(i.amount)}</td>
+                      <td>{dateText(i.date)}</td>
+                      {(data.member.permissions?.varavuSelavu?.edit || data.member.permissions?.varavuSelavu?.update) && <td><button type="button" onClick={() => openFinanceEditor("varavu", i)}>Edit / Update</button></td>}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="card">
+            <div className="card-head">
+              <div>
+                <h2>💸 Club Selavu</h2>
+                <p>Expense entries visible to members</p>
+              </div>
+              <div className="button-row">
+              {data.member.permissions?.varavuSelavu?.add && <button type="button" onClick={() => openFinanceEditor("selavu")}>+ Add Selavu</button>}
+              <button onClick={() => downloadExcel("club-selavu.xlsx", data.expenses.map(e => ({
+                Title: e.title, Category: e.category, Amount: e.amount,
+                Date: dateText(e.date), Note: e.note || ""
+              })))}>
+                Excel
+              </button>
+              </div>
+            </div>
+
+            <div className="table-wrap">
+              <table>
+                <thead><tr><th>Title</th><th>Category</th><th>Amount</th><th>Date</th>{(data.member.permissions?.varavuSelavu?.edit || data.member.permissions?.varavuSelavu?.update) && <th>Actions</th>}</tr></thead>
+                <tbody>
+                  {data.expenses.length === 0 ? (
+                    <tr><td colSpan="4">No expense entries.</td></tr>
+                  ) : data.expenses.map(e => (
+                    <tr key={e._id}>
+                      <td>{e.title}</td>
+                      <td>{e.category}</td>
+                      <td>{money(e.amount)}</td>
+                      <td>{dateText(e.date)}</td>
+                      {(data.member.permissions?.varavuSelavu?.edit || data.member.permissions?.varavuSelavu?.update) && <td><button type="button" onClick={() => openFinanceEditor("selavu", e)}>Edit / Update</button></td>}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>}
+
+        {financeMessage && <p className="notice">{financeMessage}</p>}
+        {financeEditor && <div className="card edit-card" role="dialog" aria-modal="true">
+          <div className="card-head"><h2>{financeEditor.id ? "Edit / Update" : "Add"} {financeEditor.type === "varavu" ? "Varavu" : "Selavu"}</h2><button type="button" onClick={() => setFinanceEditor(null)}>Close</button></div>
+          <form className="form" onSubmit={saveFinance}>
+            <input placeholder="Title" value={financeForm.title} onChange={e => setFinanceForm({ ...financeForm, title: e.target.value })} required />
+            <input type="number" min="0" step="0.01" placeholder="Amount" value={financeForm.amount} onChange={e => setFinanceForm({ ...financeForm, amount: e.target.value })} required />
+            <input placeholder="Category" value={financeForm.category} onChange={e => setFinanceForm({ ...financeForm, category: e.target.value })} />
+            <input type="date" value={financeForm.date} onChange={e => setFinanceForm({ ...financeForm, date: e.target.value })} />
+            <input placeholder="Note" value={financeForm.note} onChange={e => setFinanceForm({ ...financeForm, note: e.target.value })} />
+            <div className="button-row"><button className="primary" type="submit">Save entry</button><button type="button" onClick={() => setFinanceEditor(null)}>Cancel</button></div>
+          </form>
+        </div>}
+
+        <div className="card">
+          <div className="card-head">
+            <div>
+              <h2>📊 Club Finance Summary</h2>
+              <p>Current overall club financial position</p>
+            </div>
+            <button onClick={() => downloadExcel("club-finance.xlsx", financeRows)}>
+              📗 Download Excel
+            </button>
+          </div>
+
+          <div className="finance-summary">
+            <div><span>Total Varavu</span><strong>{money(data.totalIncome)}</strong></div>
+            <div><span>Total Selavu</span><strong>{money(data.totalExpense)}</strong></div>
+            <div><span>Balance</span><strong>{money(data.clubBalance)}</strong></div>
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  function AdminDashboard() {
+    const [summary, setSummary] = useState(null);
+    const [members, setMembers] = useState([]);
+    const [memberSearch, setMemberSearch] = useState("");
+    const [permissionDrafts, setPermissionDrafts] = useState({});
+    const [permissionModalMember, setPermissionModalMember] = useState(null);
+    const [auditLogs, setAuditLogs] = useState([]);
+    const [payments, setPayments] = useState([]);
+    const [incomes, setIncomes] = useState([]);
+    const [expenses, setExpenses] = useState([]);
+    const [tab, setTab] = useState("overview");
+    const [msg, setMsg] = useState("");
+
+    const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
+    const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
+    const [monthlyStatus, setMonthlyStatus] = useState(null);
+    const [monthlyLoading, setMonthlyLoading] = useState(false);
+
+    const [memberForm, setMemberForm] = useState({
+      name: "", email: "", phone: "", password: "", monthlyAmount: ""
+    });
+
+    const [paymentForm, setPaymentForm] = useState({
+      memberId: "", month: new Date().getMonth() + 1,
+      year: new Date().getFullYear(), amount: "", note: ""
+    });
+
+    const [incomeForm, setIncomeForm] = useState({
+      title: "", amount: "", category: "General",
+      date: new Date().toISOString().slice(0, 10), note: ""
+    });
+
+    const [expenseForm, setExpenseForm] = useState({
+      title: "", amount: "", category: "General",
+      date: new Date().toISOString().slice(0, 10), note: ""
+    });
+
+    const [editingIncome, setEditingIncome] = useState(null);
+    const [editingExpense, setEditingExpense] = useState(null);
+    const [editingPayment, setEditingPayment] = useState(null);
+    const [historyMonth, setHistoryMonth] = useState(String(new Date().getMonth() + 1));
+    const [historyYear, setHistoryYear] = useState(String(new Date().getFullYear()));
+    const [historyPage, setHistoryPage] = useState(1);
+    const historyPageSize = 10;
+
+    async function load() {
+      const [s, m, p, i, e] = await Promise.all([
+        api("/admin/summary"),
+        api("/admin/members"),
+        api("/admin/payments"),
+        api("/admin/incomes"),
+        api("/admin/expenses")
+      ]);
+
+      setSummary(s);
+      setMembers(m);
+      setPayments(p);
+      setIncomes(i);
+      setExpenses(e);
+
+      if (!paymentForm.memberId && m[0]) {
+        setPaymentForm(f => ({ ...f, memberId: m[0]._id }));
+      }
+    }
+
+    async function loadAuditLogs() {
+      try { setAuditLogs(await api("/admin/audit")); } catch (e) { setMsg(e.message); }
+    }
+
+    async function loadMonthlyStatus() {
+      try {
+        setMonthlyLoading(true);
+        const data = await api(
+          `/admin/monthly-status?month=${selectedMonth}&year=${selectedYear}`
+        );
+        setMonthlyStatus(data);
+      } catch (e) {
+        setMsg(e.message);
+      } finally {
+        setMonthlyLoading(false);
+      }
+    }
+
+    useEffect(() => {
+      load().catch(e => setMsg(e.message));
+    }, []);
+
+    useEffect(() => {
+      if (tab === "overview") {
+        loadMonthlyStatus();
+      }
+      if (tab === "audit") loadAuditLogs();
+    }, [selectedMonth, selectedYear, tab]);
+
+    function permissionFor(m) {
+      return permissionDrafts[m._id] || m.permissions || { payments: "own", varavuSelavu: { view: true, add: false, edit: false, update: false } };
+    }
+    async function savePermissions(m) {
+      try {
+        const permissions = permissionFor(m);
+        const result = await api(`/admin/members/${m._id}/permissions`, { method: "PATCH", body: JSON.stringify({ permissions }) });
+        setMembers(old => old.map(item => item._id === m._id ? { ...item, permissions: result.member.permissions } : item));
+        setPermissionDrafts(old => { const next = { ...old }; delete next[m._id]; return next; });
+        setMsg(`Permissions saved for ${m.name}`);
+        setPermissionModalMember(null);
+      } catch (e) { setMsg(e.message); }
+    }
+
+    async function addMember(e) {
+      e.preventDefault();
+      try {
+        await api("/admin/members", {
+          method: "POST",
+          body: JSON.stringify(memberForm)
+        });
+        setMemberForm({ name:"", email:"", phone:"", password:"", monthlyAmount:"" });
+        setMsg("Member added successfully");
+        await load();
+      } catch (e) {
+        setMsg(e.message);
+      }
+    }
+
+    async function addPayment(e) {
+      e.preventDefault();
+      try {
+        await api("/admin/payments", {
+          method: "POST",
+          body: JSON.stringify(paymentForm)
+        });
+        setPaymentForm(f => ({ ...f, amount:"", note:"" }));
+        setMsg("Payment recorded");
+        await load();
+        await loadMonthlyStatus();
+      } catch (e) {
+        setMsg(e.message);
+      }
+    }
+
+    async function savePayment(e) {
+      e.preventDefault();
+      try {
+        await api(`/admin/payments/${editingPayment._id}`, {
+          method: "PATCH",
+          body: JSON.stringify({
+            memberId: editingPayment.memberId,
+            month: Number(editingPayment.month),
+            year: Number(editingPayment.year),
+            amount: Number(editingPayment.amount),
+            note: editingPayment.note || "",
+            paidAt: editingPayment.paidAt
+          })
+        });
+        setEditingPayment(null);
+        setMsg("Payment updated successfully");
+        await load();
+        await loadMonthlyStatus();
+      } catch (e) {
+        setMsg(e.message);
+      }
+    }
+
+    async function addIncome(e) {
+      e.preventDefault();
+      try {
+        await api("/admin/incomes", {
+          method: "POST",
+          body: JSON.stringify(incomeForm)
+        });
+        setIncomeForm({
+          title:"", amount:"", category:"General",
+          date:new Date().toISOString().slice(0,10), note:""
+        });
+        setMsg("Varavu added successfully");
+        await load();
+      } catch (e) {
+        setMsg(e.message);
+      }
+    }
+
+    async function saveIncome(e) {
+      e.preventDefault();
+      try {
+        await api(`/admin/incomes/${editingIncome._id}`, {
+          method: "PATCH",
+          body: JSON.stringify(editingIncome)
+        });
+        setEditingIncome(null);
+        setMsg("Varavu updated successfully");
+        await load();
+      } catch (e) {
+        setMsg(e.message);
+      }
+    }
+
+    async function deleteIncome(id) {
+      if (!confirm("Delete this income entry?")) return;
+      try {
+        await api(`/admin/incomes/${id}`, { method:"DELETE" });
+        setMsg("Varavu deleted");
+        await load();
+      } catch (e) {
+        setMsg(e.message);
+      }
+    }
+
+    async function addExpense(e) {
+      e.preventDefault();
+      try {
+        await api("/admin/expenses", {
+          method: "POST",
+          body: JSON.stringify(expenseForm)
+        });
+        setExpenseForm({
+          title:"", amount:"", category:"General",
+          date:new Date().toISOString().slice(0,10), note:""
+        });
+        setMsg("Selavu added successfully");
+        await load();
+      } catch (e) {
+        setMsg(e.message);
+      }
+    }
+
+    async function saveExpense(e) {
+      e.preventDefault();
+      try {
+        await api(`/admin/expenses/${editingExpense._id}`, {
+          method: "PATCH",
+          body: JSON.stringify(editingExpense)
+        });
+        setEditingExpense(null);
+        setMsg("Selavu updated successfully");
+        await load();
+      } catch (e) {
+        setMsg(e.message);
+      }
+    }
+
+    async function deleteExpense(id) {
+      if (!confirm("Delete this expense entry?")) return;
+      try {
+        await api(`/admin/expenses/${id}`, { method:"DELETE" });
+        setMsg("Selavu deleted");
+        await load();
+      } catch (e) {
+        setMsg(e.message);
+      }
+    }
+
+    async function toggleMember(m) {
+      try {
+        await api(`/admin/members/${m._id}/status`, {
+          method:"PATCH",
+          body:JSON.stringify({ active:!m.active })
+        });
+        await load();
+        await loadMonthlyStatus();
+      } catch (e) {
+        setMsg(e.message);
+      }
+    }
+
+    async function deleteMember(m) {
+      if (!confirm(`Archive ${m.name}? Login will be disabled, but all payment history will be preserved.`)) return;
+      try {
+        await api(`/admin/members/${m._id}`, { method:"DELETE" });
+        await load();
+        await loadMonthlyStatus();
+      } catch (e) {
+        setMsg(e.message);
+      }
+    }
+
+    const filteredMembers = members.filter(m => `${m.name} ${m.email} ${m.phone || ""}`.toLowerCase().includes(memberSearch.toLowerCase().trim()));
+    const filteredHistoryPayments = payments.filter(p =>
+      (historyMonth === "all" || Number(p.month) === Number(historyMonth)) &&
+      (historyYear === "all" || Number(p.year) === Number(historyYear))
+    ).sort((a, b) => Number(b.year) - Number(a.year) || Number(b.month) - Number(a.month) || new Date(b.paidAt || 0) - new Date(a.paidAt || 0));
+    const historyTotalPages = Math.max(1, Math.ceil(filteredHistoryPayments.length / historyPageSize));
+    const visibleHistoryPayments = filteredHistoryPayments.slice((historyPage - 1) * historyPageSize, historyPage * historyPageSize);
+    const historyCollectionTotal = filteredHistoryPayments.reduce((sum, p) => sum + Math.max(0, Number(p.amount) || 0), 0);
+    const paymentRows = filteredHistoryPayments.map(p => ({
+      Member:p.member?.name || "",
+      Email:p.member?.email || "",
+      Month:months[p.month-1],
+      Year:p.year,
+      Amount:p.amount,
+      PaidDate:dateText(p.paidAt)
+    }));
+
+    const incomeRows = incomes.map(i => ({
+      Title:i.title, Category:i.category, Amount:i.amount,
+      Date:dateText(i.date), Note:i.note || ""
+    }));
+
+    const expenseRows = expenses.map(e => ({
+      Title:e.title, Category:e.category, Amount:e.amount,
+      Date:dateText(e.date), Note:e.note || ""
+    }));
+
+    return (
+      <section>
+        <div className="page-title">
+          <div>
+            <h1>Admin Dashboard</h1>
+            <p>Members, monthly collection, varavu and selavu</p>
+          </div>
+        </div>
+
+        {msg && <div className="notice">{msg}</div>}
+
+        <nav className="tabs">
+          {["overview","members","payments","varavu","selavu","reports","audit"].map(t => (
+            <button
+              key={t}
+              className={tab === t ? "active" : ""}
+              onClick={() => setTab(t)}
+            >
+              {t === "varavu" ? "Varavu" : t === "selavu" ? "Selavu" : t === "audit" ? "Audit History" : t}
+            </button>
+          ))}
+        </nav>
+
+        {tab === "overview" && summary && (
+          <div>
+            <div className="stats">
+              <Stat title="Members" value={summary.members}/>
+              <Stat title="Member Collection" value={money(summary.paymentIncome)}/>
+              <Stat title="Other Varavu" value={money(summary.otherIncome)}/>
+              <Stat title="Total Varavu" value={money(summary.income)}/>
+              <Stat title="Total Selavu" value={money(summary.expense)}/>
+              <Stat title="Balance" value={money(summary.balance)}/>
+            </div>
+
+            <div className="card chart-card">
+              <div className="card-head"><div><h2>📈 Club Finance Snapshot</h2><p>Visual comparison of current totals</p></div></div>
+              {[{label:"Member collection",value:summary.paymentIncome,color:"teal"},{label:"Other varavu",value:summary.otherIncome,color:"gold"},{label:"Selavu",value:summary.expense,color:"coral"},{label:"Balance",value:Math.max(0,summary.balance),color:"navy"}].map(item => { const max = Math.max(1,summary.income,summary.expense); return <div className="chart-row" key={item.label}><div><span>{item.label}</span><strong>{money(item.value)}</strong></div><div className="chart-track"><div className={`chart-fill ${item.color}`} style={{width:`${Math.min(100,Math.max(0,item.value)/max*100)}%`}} /></div></div>; })}
+            </div>
+
+            <div className="card monthly-selector">
+              <div>
+                <h2>Monthly Payment Status</h2>
+                <p>Paid and pending members for selected month.</p>
+              </div>
+              <div className="month-controls">
+                <select value={selectedMonth} onChange={e=>setSelectedMonth(Number(e.target.value))}>
+                  {months.map((m,i)=><option key={m} value={i+1}>{m}</option>)}
+                </select>
+                <select value={selectedYear} onChange={e=>setSelectedYear(Number(e.target.value))}>
+                  {[2025,2026,2027,2028,2029,2030].map(y=><option key={y} value={y}>{y}</option>)}
+                </select>
+                <button className="primary" onClick={loadMonthlyStatus}>View</button>
+              </div>
+            </div>
+
+            {monthlyLoading && <div className="card"><p>Loading monthly status...</p></div>}
+
+            {monthlyStatus && !monthlyLoading && (
+              <>
+                <div className="stats">
+                  <Stat title="Month Members" value={monthlyStatus.totalMembers}/>
+                  <Stat title="Paid" value={monthlyStatus.paidCount}/>
+                  <Stat title="Pending" value={monthlyStatus.pendingCount}/>
+                  <Stat title="Month Collection" value={money(monthlyStatus.totalPaidAmount)}/>
+                  <Stat title="Pending Amount" value={money(monthlyStatus.pendingAmount)}/>
+                </div>
+
+                <div className="monthly-grid">
+                  <div className="card">
+                    <div className="card-head">
+                      <div>
+                        <h2>✅ Paid Members</h2>
+                        <p>{months[selectedMonth-1]} {selectedYear}</p>
+                      </div>
+                      <span className="count-badge paid-count">{monthlyStatus.paidCount}</span>
+                    </div>
+                    <div className="table-wrap">
+                      <table>
+                        <thead><tr><th>#</th><th>Member</th><th>Phone</th><th>Amount</th><th>Date</th></tr></thead>
+                        <tbody>
+                          {monthlyStatus.paid.length === 0
+                            ? <tr><td colSpan="5">No paid members.</td></tr>
+                            : monthlyStatus.paid.map((m,i)=>
+                              <tr key={m.id}>
+                                <td>{i+1}</td>
+                                <td><strong>{m.name}</strong><br/><small>{m.email}</small></td>
+                                <td>{m.phone || "-"}</td>
+                                <td>{money(m.amount)}</td>
+                                <td>{dateText(m.paidAt)}</td>
+                              </tr>
+                            )
+                          }
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  <div className="card">
+                    <div className="card-head">
+                      <div>
+                        <h2>⏳ Pending Members</h2>
+                        <p>{months[selectedMonth-1]} {selectedYear}</p>
+                      </div>
+                      <span className="count-badge pending-count">{monthlyStatus.pendingCount}</span>
+                    </div>
+                    <div className="table-wrap">
+                      <table>
+                        <thead><tr><th>#</th><th>Member</th><th>Monthly</th><th>Paid</th><th>Balance</th><th>Status</th></tr></thead>
+                        <tbody>
+                          {monthlyStatus.pending.length === 0
+                            ? <tr><td colSpan="6">🎉 All active members have paid!</td></tr>
+                            : monthlyStatus.pending.map((m,i)=>
+                              <tr key={m.id}>
+                                <td>{i+1}</td>
+                                <td><strong>{m.name}</strong><br/><small>{m.phone || m.email}</small></td>
+                                <td>{money(m.monthlyAmount)}</td>
+                                <td>{money(m.paidAmount || 0)}</td>
+                                <td>{money(m.remainingAmount ?? m.monthlyAmount)}</td>
+                                <td><span className="badge pending">{m.paidAmount > 0 ? "Partial" : "Pending"}</span></td>
+                              </tr>
+                            )
+                          }
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="card">
+                  <h2>Monthly Report</h2>
+                  <div className="report-buttons">
+                    <button onClick={()=>{
+                      const rows = [
+                        ...monthlyStatus.paid.map(m=>({
+                          Name:m.name, Email:m.email, Phone:m.phone || "",
+                          Status:"Paid", Amount:m.amount, Date:dateText(m.paidAt)
+                        })),
+                        ...monthlyStatus.pending.map(m=>({
+                          Name:m.name, Email:m.email, Phone:m.phone || "",
+                          Status:m.paidAmount > 0 ? "Partial" : "Pending", Paid:m.paidAmount || 0, Balance:m.remainingAmount ?? m.monthlyAmount, Date:"-"
+                        }))
+                      ];
+                      downloadExcel(`MSK-${months[selectedMonth-1]}-${selectedYear}.xlsx`, rows);
+                    }}>📗 Excel</button>
+
+                    <button onClick={()=>{
+                      const rows = [
+                        ...monthlyStatus.paid.map(m=>[
+                          m.name,m.phone || "-","Paid",money(m.amount),dateText(m.paidAt)
+                        ]),
+                        ...monthlyStatus.pending.map(m=>[
+                          m.name,m.phone || "-",m.paidAmount > 0 ? "Partial" : "Pending",money(m.paidAmount || 0),"-"
+                        ])
+                      ];
+                      downloadPdf(
+                        `MSK Youth Club - ${months[selectedMonth-1]} ${selectedYear}`,
+                        ["Member","Phone","Status","Amount","Paid Date"],
+                        rows,
+                        `MSK-${months[selectedMonth-1]}-${selectedYear}.pdf`
+                      );
+                    }}>📄 PDF</button>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
+        {tab === "members" && (
+          <div className="grid2">
+            <form className="card form" onSubmit={addMember}>
+              <h2>Add Member</h2>
+              <input placeholder="Member name" value={memberForm.name} onChange={e=>setMemberForm({...memberForm,name:e.target.value})} required/>
+              <input placeholder="Email" type="email" value={memberForm.email} onChange={e=>setMemberForm({...memberForm,email:e.target.value})} required/>
+              <input placeholder="Phone" value={memberForm.phone} onChange={e=>setMemberForm({...memberForm,phone:e.target.value})}/>
+              <input placeholder="Login password" type="password" value={memberForm.password} onChange={e=>setMemberForm({...memberForm,password:e.target.value})} required/>
+              <input placeholder="Monthly amount" type="number" value={memberForm.monthlyAmount} onChange={e=>setMemberForm({...memberForm,monthlyAmount:e.target.value})}/>
+              <button className="primary">Create Member Login</button>
+            </form>
+
+            <div className="card">
+              <h2>Members ({members.length})</h2>
+              <input className="member-search" placeholder="Search by name, email or phone..." value={memberSearch} onChange={e=>setMemberSearch(e.target.value)} aria-label="Search members"/>
+              <div className="table-wrap">
+                <table>
+                  <thead><tr><th>Name</th><th>Phone</th><th>Monthly</th><th>Status</th><th>Permissions</th><th>Actions</th></tr></thead>
+                  <tbody>
+                    {filteredMembers.map(m=>(
+                      <tr key={m._id}>
+                        <td>{m.name}<br/><small>{m.email}</small></td>
+                        <td>{m.phone || "-"}</td>
+                        <td>{money(m.monthlyAmount)}</td>
+                        <td><span className={m.active ? "badge paid":"badge pending"}>{m.active?"Active":"Inactive"}</span></td>
+                        <td><button type="button" className="permission-open" onClick={() => setPermissionModalMember(m)}>Permissions</button></td>
+                        <td>
+                          <button onClick={()=>toggleMember(m)}>{m.active?"Deactivate":"Activate"}</button>
+                          {" "}
+                          <button className="danger" onClick={()=>deleteMember(m)}>Archive</button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {tab === "payments" && (
+          <>
+          <div className="grid2">
+            <form className="card form" onSubmit={addPayment}>
+              <h2>Record Monthly Payment</h2>
+              <select value={paymentForm.memberId} onChange={e=>setPaymentForm({...paymentForm,memberId:e.target.value})} required>
+                <option value="">Select member</option>
+                {members.filter(m=>m.active).map(m=><option key={m._id} value={m._id}>{m.name}</option>)}
+              </select>
+              <select value={paymentForm.month} onChange={e=>setPaymentForm({...paymentForm,month:Number(e.target.value)})}>
+                {months.map((m,i)=><option key={m} value={i+1}>{m}</option>)}
+              </select>
+              <input type="number" value={paymentForm.year} onChange={e=>setPaymentForm({...paymentForm,year:Number(e.target.value)})}/>
+              <input type="number" placeholder="Amount" value={paymentForm.amount} onChange={e=>setPaymentForm({...paymentForm,amount:e.target.value})} required/>
+              <input placeholder="Note" value={paymentForm.note} onChange={e=>setPaymentForm({...paymentForm,note:e.target.value})}/>
+              <button className="primary">Mark Paid</button>
+            </form>
+
+            <div className="card collection-card">
+              <div className="card-head collection-head">
+                <div>
+                  <h2>Collection History</h2>
+                  <p>Filter collections by month and year</p>
+                </div>
+                <div className="button-row">
+                  <button onClick={()=>downloadExcel("msk-payments.xlsx",paymentRows)}>Excel</button>
+                  <button onClick={()=>downloadPdf(
+                    "MSK Youth Club - Collection Report",
+                    ["Member","Month","Year","Amount","Date"],
+                    filteredHistoryPayments.map(p=>[p.member?.name || "",months[p.month-1],p.year,money(p.amount),dateText(p.paidAt)]),
+                    "msk-collection-report.pdf"
+                  )}>PDF</button>
+                </div>
+              </div>
+
+              <div className="collection-filters">
+                <label>Month
+                  <select value={historyMonth} onChange={e=>{setHistoryMonth(e.target.value);setHistoryPage(1);}}>
+                    <option value="all">All months</option>
+                    {months.map((m,i)=><option key={m} value={i+1}>{m}</option>)}
+                  </select>
+                </label>
+                <label>Year
+                  <select value={historyYear} onChange={e=>{setHistoryYear(e.target.value);setHistoryPage(1);}}>
+                    <option value="all">All years</option>
+                    {[...new Set([new Date().getFullYear(), ...payments.map(p=>Number(p.year)).filter(Boolean)])].sort((a,b)=>b-a).map(y=><option key={y} value={y}>{y}</option>)}
+                  </select>
+                </label>
+                <div className="collection-total"><span>Filtered collection</span><strong>{money(historyCollectionTotal)}</strong><small>{filteredHistoryPayments.length} payment{filteredHistoryPayments.length===1?"":"s"}</small></div>
+              </div>
+
+              <div className="table-wrap collection-table-wrap">
+                <table>
+                  <thead><tr><th>Member</th><th>Month</th><th>Year</th><th>Amount</th><th>Date</th><th>Note</th><th>Action</th></tr></thead>
+                  <tbody>
+                    {visibleHistoryPayments.map(p=><tr key={p._id}>
+                      <td>{p.member?.name || "-"}</td>
+                      <td>{months[p.month-1]}</td>
+                      <td>{p.year}</td>
+                      <td>{money(p.amount)}</td>
+                      <td>{dateText(p.paidAt)}</td>
+                      <td>{p.note || "-"}</td>
+                      <td><div className="button-row"><button type="button" onClick={()=>downloadPdf(`MSK Youth Club Payment Receipt`,["Field","Value"],[["Receipt ID",String(p._id).slice(-8).toUpperCase()],["Member",p.member?.name || ""],["Month",months[p.month-1]],["Year",p.year],["Amount",money(p.amount)],["Paid Date",dateText(p.paidAt)],["Note",p.note || "-" ]],`MSK-receipt-${String(p._id).slice(-8)}.pdf`)}>Receipt</button><button type="button" onClick={()=>setEditingPayment({
+                        _id:p._id, memberId:p.member?._id || "", month:p.month, year:p.year,
+                        amount:String(p.amount), note:p.note || "",
+                        paidAt:p.paidAt ? new Date(p.paidAt).toISOString().slice(0,10) : new Date().toISOString().slice(0,10)
+                      })}>Edit</button></div></td>
+                    </tr>)}
+                    {filteredHistoryPayments.length === 0 && <tr><td colSpan="7" className="empty-history">No payments found for this month and year.</td></tr>}
+                  </tbody>
+                </table>
+              </div>
+              {filteredHistoryPayments.length > 0 && <div className="history-pagination">
+                <span>Showing {(historyPage-1)*historyPageSize+1}–{Math.min(historyPage*historyPageSize,filteredHistoryPayments.length)} of {filteredHistoryPayments.length}</span>
+                <div className="button-row">
+                  <button disabled={historyPage===1} onClick={()=>setHistoryPage(page=>Math.max(1,page-1))}>Previous</button>
+                  <span className="page-indicator">Page {historyPage} of {historyTotalPages}</span>
+                  <button disabled={historyPage>=historyTotalPages} onClick={()=>setHistoryPage(page=>Math.min(historyTotalPages,page+1))}>Next</button>
+                </div>
+              </div>}
+            </div>
+          </div>
+          {editingPayment && (
+            <div className="card edit-card">
+              <h2>Edit Payment</h2>
+              <form className="form" onSubmit={savePayment}>
+                <label>Member</label>
+                <select value={editingPayment.memberId} onChange={e=>setEditingPayment({...editingPayment,memberId:e.target.value})} required>
+                  {members.map(m=><option key={m._id} value={m._id}>{m.name}</option>)}
+                </select>
+                <label>Month</label>
+                <select value={editingPayment.month} onChange={e=>setEditingPayment({...editingPayment,month:Number(e.target.value)})}>
+                  {months.map((m,i)=><option key={m} value={i+1}>{m}</option>)}
+                </select>
+                <label>Year</label>
+                <input type="number" value={editingPayment.year} onChange={e=>setEditingPayment({...editingPayment,year:Number(e.target.value)})} required />
+                <label>Amount (enter 0 to mark as pending)</label>
+                <input type="number" min="0" value={editingPayment.amount} onChange={e=>setEditingPayment({...editingPayment,amount:e.target.value})} required />
+                <label>Paid date</label>
+                <input type="date" value={editingPayment.paidAt} onChange={e=>setEditingPayment({...editingPayment,paidAt:e.target.value})} required />
+                <label>Note</label>
+                <input value={editingPayment.note} onChange={e=>setEditingPayment({...editingPayment,note:e.target.value})} />
+                <div className="button-row">
+                  <button className="primary">Save Changes</button>
+                  <button type="button" onClick={()=>setEditingPayment(null)}>Cancel</button>
+                </div>
+              </form>
+            </div>
+          )}
+          </>
+        )}
+
+        {tab === "varavu" && (
+          <div className="grid2">
+            <form className="card form" onSubmit={addIncome}>
+              <h2>➕ Add Varavu / Income</h2>
+              <input placeholder="Income title" value={incomeForm.title} onChange={e=>setIncomeForm({...incomeForm,title:e.target.value})} required/>
+              <input type="number" placeholder="Amount" value={incomeForm.amount} onChange={e=>setIncomeForm({...incomeForm,amount:e.target.value})} required/>
+              <input placeholder="Category" value={incomeForm.category} onChange={e=>setIncomeForm({...incomeForm,category:e.target.value})}/>
+              <input type="date" value={incomeForm.date} onChange={e=>setIncomeForm({...incomeForm,date:e.target.value})}/>
+              <input placeholder="Note" value={incomeForm.note} onChange={e=>setIncomeForm({...incomeForm,note:e.target.value})}/>
+              <button className="primary">Add Varavu</button>
+            </form>
+
+            <div className="card">
+              <div className="card-head">
+                <div><h2>Varavu History</h2><p>Total: {money(summary?.otherIncome)}</p></div>
+                <div className="button-row">
+                  <button onClick={()=>downloadExcel("msk-varavu.xlsx",incomeRows)}>Excel</button>
+                  <button onClick={()=>downloadPdf("MSK Youth Club - Varavu",["Title","Category","Amount","Date"],incomes.map(i=>[i.title,i.category,money(i.amount),dateText(i.date)]),"msk-varavu.pdf")}>PDF</button>
+                </div>
+              </div>
+
+              <div className="table-wrap">
+                <table>
+                  <thead><tr><th>Title</th><th>Category</th><th>Amount</th><th>Date</th><th>Actions</th></tr></thead>
+                  <tbody>
+                    {incomes.map(i=>(
+                      <tr key={i._id}>
+                        <td>{i.title}<br/><small>{i.note || ""}</small></td>
+                        <td>{i.category}</td>
+                        <td>{money(i.amount)}</td>
+                        <td>{dateText(i.date)}</td>
+                        <td>
+                          <button onClick={()=>setEditingIncome({...i,date:new Date(i.date).toISOString().slice(0,10)})}>Edit</button>{" "}
+                          <button className="danger" onClick={()=>deleteIncome(i._id)}>Delete</button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {editingIncome && (
+              <div className="card edit-card">
+                <h2>Edit Varavu</h2>
+                <form className="form" onSubmit={saveIncome}>
+                  <input value={editingIncome.title} onChange={e=>setEditingIncome({...editingIncome,title:e.target.value})} required/>
+                  <input type="number" value={editingIncome.amount} onChange={e=>setEditingIncome({...editingIncome,amount:e.target.value})} required/>
+                  <input value={editingIncome.category} onChange={e=>setEditingIncome({...editingIncome,category:e.target.value})}/>
+                  <input type="date" value={editingIncome.date} onChange={e=>setEditingIncome({...editingIncome,date:e.target.value})}/>
+                  <input value={editingIncome.note || ""} onChange={e=>setEditingIncome({...editingIncome,note:e.target.value})}/>
+                  <div className="button-row">
+                    <button className="primary">Save Changes</button>
+                    <button type="button" onClick={()=>setEditingIncome(null)}>Cancel</button>
+                  </div>
+                </form>
+              </div>
+            )}
+          </div>
+        )}
+
+        {tab === "selavu" && (
+          <div className="grid2">
+            <form className="card form" onSubmit={addExpense}>
+              <h2>➕ Add Selavu / Expense</h2>
+              <input placeholder="Expense title" value={expenseForm.title} onChange={e=>setExpenseForm({...expenseForm,title:e.target.value})} required/>
+              <input type="number" placeholder="Amount" value={expenseForm.amount} onChange={e=>setExpenseForm({...expenseForm,amount:e.target.value})} required/>
+              <input placeholder="Category" value={expenseForm.category} onChange={e=>setExpenseForm({...expenseForm,category:e.target.value})}/>
+              <input type="date" value={expenseForm.date} onChange={e=>setExpenseForm({...expenseForm,date:e.target.value})}/>
+              <input placeholder="Note" value={expenseForm.note} onChange={e=>setExpenseForm({...expenseForm,note:e.target.value})}/>
+              <button className="primary">Add Selavu</button>
+            </form>
+
+            <div className="card">
+              <div className="card-head">
+                <div><h2>Selavu History</h2><p>Total: {money(summary?.expense)}</p></div>
+                <div className="button-row">
+                  <button onClick={()=>downloadExcel("msk-selavu.xlsx",expenseRows)}>Excel</button>
+                  <button onClick={()=>downloadPdf("MSK Youth Club - Selavu",["Title","Category","Amount","Date"],expenses.map(e=>[e.title,e.category,money(e.amount),dateText(e.date)]),"msk-selavu.pdf")}>PDF</button>
+                </div>
+              </div>
+
+              <div className="table-wrap">
+                <table>
+                  <thead><tr><th>Title</th><th>Category</th><th>Amount</th><th>Date</th><th>Actions</th></tr></thead>
+                  <tbody>
+                    {expenses.map(e=>(
+                      <tr key={e._id}>
+                        <td>{e.title}<br/><small>{e.note || ""}</small></td>
+                        <td>{e.category}</td>
+                        <td>{money(e.amount)}</td>
+                        <td>{dateText(e.date)}</td>
+                        <td>
+                          <button onClick={()=>setEditingExpense({...e,date:new Date(e.date).toISOString().slice(0,10)})}>Edit</button>{" "}
+                          <button className="danger" onClick={()=>deleteExpense(e._id)}>Delete</button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {editingExpense && (
+              <div className="card edit-card">
+                <h2>Edit Selavu</h2>
+                <form className="form" onSubmit={saveExpense}>
+                  <input value={editingExpense.title} onChange={e=>setEditingExpense({...editingExpense,title:e.target.value})} required/>
+                  <input type="number" value={editingExpense.amount} onChange={e=>setEditingExpense({...editingExpense,amount:e.target.value})} required/>
+                  <input value={editingExpense.category} onChange={e=>setEditingExpense({...editingExpense,category:e.target.value})}/>
+                  <input type="date" value={editingExpense.date} onChange={e=>setEditingExpense({...editingExpense,date:e.target.value})}/>
+                  <input value={editingExpense.note || ""} onChange={e=>setEditingExpense({...editingExpense,note:e.target.value})}/>
+                  <div className="button-row">
+                    <button className="primary">Save Changes</button>
+                    <button type="button" onClick={()=>setEditingExpense(null)}>Cancel</button>
+                  </div>
+                </form>
+              </div>
+            )}
+          </div>
+        )}
+
+        {tab === "reports" && (
+          <div className="card">
+            <h2>Download Reports</h2>
+            <div className="report-buttons">
+              <button onClick={()=>downloadExcel("msk-members.xlsx",members.map(m=>({
+                Name:m.name,Email:m.email,Phone:m.phone,
+                MonthlyAmount:m.monthlyAmount,Status:m.active?"Active":"Inactive",
+                Joined:dateText(m.joinedAt)
+              })))}>Members Excel</button>
+
+              <button onClick={()=>downloadExcel("msk-payments.xlsx",paymentRows)}>Payments Excel</button>
+              <button onClick={()=>downloadExcel("msk-varavu.xlsx",incomeRows)}>Varavu Excel</button>
+              <button onClick={()=>downloadExcel("msk-selavu.xlsx",expenseRows)}>Selavu Excel</button>
+
+              <button onClick={()=>downloadPdf(
+                "MSK Youth Club - Varavu",
+                ["Title","Category","Amount","Date"],
+                incomes.map(i=>[i.title,i.category,money(i.amount),dateText(i.date)]),
+                "varavu.pdf"
+              )}>Varavu PDF</button>
+
+              <button onClick={()=>downloadPdf(
+                "MSK Youth Club - Selavu",
+                ["Title","Category","Amount","Date"],
+                expenses.map(e=>[e.title,e.category,money(e.amount),dateText(e.date)]),
+                "selavu.pdf"
+              )}>Selavu PDF</button>
+
+              <button onClick={()=>downloadPdf(
+                "MSK Youth Club - Payments",
+                ["Member","Month","Year","Amount"],
+                payments.map(p=>[p.member?.name || "",months[p.month-1],p.year,money(p.amount)]),
+                "payments.pdf"
+              )}>Payments PDF</button>
+            </div>
+          </div>
+        )}
+
+        {tab === "audit" && (
+          <div className="card">
+            <div className="card-head"><div><h2>Admin Audit History</h2><p>Recent payment, member and finance changes</p></div><button onClick={loadAuditLogs}>Refresh</button></div>
+            <div className="table-wrap"><table><thead><tr><th>Time</th><th>Admin</th><th>Action</th><th>Record</th><th>Details</th></tr></thead><tbody>
+              {auditLogs.map(log=><tr key={log._id}><td>{dateText(log.createdAt)} {log.createdAt ? new Date(log.createdAt).toLocaleTimeString("en-IN") : ""}</td><td>{log.actorEmail || "Admin"}</td><td><span className="badge paid">{log.action}</span></td><td>{log.entity || "-"}</td><td>{log.details || "-"}</td></tr>)}
+              {!auditLogs.length && <tr><td colSpan="5">No audit events yet. Changes made after this update will appear here.</td></tr>}
+            </tbody></table></div>
+          </div>
+        )}
+
+        {permissionModalMember && (() => {
+          const m = permissionModalMember;
+          const p = permissionFor(m);
+          const f = p.varavuSelavu || {};
+          const setFinancePermission = (key, value) => setPermissionDrafts(old => ({
+            ...old,
+            [m._id]: {
+              ...permissionFor(m),
+              varavuSelavu: { ...(permissionFor(m).varavuSelavu || {}), [key]: value }
+            }
+          }));
+          return <div className="permission-modal-backdrop" role="presentation" onMouseDown={e => { if (e.target === e.currentTarget) setPermissionModalMember(null); }}>
+            <div className="permission-modal" role="dialog" aria-modal="true" aria-labelledby="permission-modal-title">
+              <div className="permission-modal-head">
+                <div><h2 id="permission-modal-title">Member Permissions</h2><p>{m.name} · {m.email}</p></div>
+                <button type="button" className="permission-close" onClick={() => setPermissionModalMember(null)} aria-label="Close permissions">✕</button>
+              </div>
+              <label className="permission-payment-select">Payment access
+                <select value={p.payments || "own"} onChange={e => setPermissionDrafts(old => ({ ...old, [m._id]: { ...permissionFor(m), payments: e.target.value } }))}>
+                  <option value="none">No access</option><option value="own">Own payments only</option><option value="all">All members' payments</option>
+                </select>
+              </label>
+              <h3>Varavu-Selavu access</h3>
+              <div className="permission-check-grid">
+                {[ ["view","View records"], ["add","Add records"], ["edit","Edit records"], ["update","Update records"] ].map(([key,label]) => <label key={key}><input type="checkbox" checked={Boolean(f[key])} onChange={e => setFinancePermission(key, e.target.checked)} />{label}</label>)}
+              </div>
+              <div className="permission-modal-actions"><button type="button" onClick={() => setPermissionModalMember(null)}>Cancel</button><button type="button" className="primary" onClick={() => savePermissions(m)}>Save permissions</button></div>
+            </div>
+          </div>;
+        })()}
+      </section>
+    );
+  }
+
+  function App() {
+    const [user, setUser] = useState(
+      () => JSON.parse(localStorage.getItem("msk_user") || "null")
+    );
+
+    function logout() {
+      localStorage.removeItem("msk_token");
+      localStorage.removeItem("msk_user");
+      setUser(null);
+    }
+
+    if (!user) return <Login onLogin={setUser}/>;
+
+    return (
+      <Layout user={user} onLogout={logout}>
+        {user.role === "admin" ? <AdminDashboard/> : <MemberDashboard/>}
+      </Layout>
+    );
+  }
+
+  createRoot(document.getElementById("root")).render(<App/>);
