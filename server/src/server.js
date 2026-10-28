@@ -33,7 +33,6 @@ const userSchema = new mongoose.Schema({
   role: { type: String, enum: ["admin", "member"], default: "member" },
   active: { type: Boolean, default: true },
   monthlyAmount: { type: Number, default: 0, min: 0 },
-  permissions: { type: mongoose.Schema.Types.Mixed, default: () => ({ payments: "own", varavuSelavu: { view: true, add: false, edit: false, update: false } }) },
   joinedAt: { type: Date, default: Date.now }
 }, { timestamps: true });
 
@@ -102,7 +101,6 @@ function safeUser(user) {
     role: user.role,
     active: user.active,
     monthlyAmount: user.monthlyAmount || 0,
-    permissions: user.permissions || { payments: "own", varavuSelavu: { view: true, add: false, edit: false, update: false } },
     joinedAt: user.joinedAt
   };
 }
@@ -158,16 +156,6 @@ app.get("/api/me", auth(), async (req, res) => {
   res.json({ user: safeUser(req.user) });
 });
 
-
-function can(req, key) {
-  const p = req.user?.permissions || {};
-  if (key === "paymentsAll") return p.payments === "all";
-  const finance = p.varavuSelavu || {};
-  return finance[key] === true;
-}
-function requirePermission(key) {
-  return (req, res, next) => can(req, key) ? next() : res.status(403).json({ message: "Permission denied by admin" });
-}
 
 // ADMIN MEMBERS
 app.get("/api/admin/members", auth("admin"), async (req, res) => {
@@ -232,24 +220,6 @@ app.patch("/api/admin/members/:id", auth("admin"), async (req, res) => {
   } catch (e) {
     res.status(500).json({ message: e.message });
   }
-});
-
-app.patch("/api/admin/members/:id/permissions", auth("admin"), async (req, res) => {
-  const member = await User.findOne({ _id: req.params.id, role: "member" });
-  if (!member) return res.status(404).json({ message: "Member not found" });
-  const incoming = req.body.permissions || {};
-  member.permissions = {
-    payments: ["none", "own", "all"].includes(incoming.payments) ? incoming.payments : "own",
-    varavuSelavu: {
-      view: Boolean(incoming.varavuSelavu?.view),
-      add: Boolean(incoming.varavuSelavu?.add),
-      edit: Boolean(incoming.varavuSelavu?.edit),
-      update: Boolean(incoming.varavuSelavu?.update)
-    }
-  };
-  await member.save();
-  await writeAudit(req, "MEMBER_PERMISSIONS_UPDATED", "Member", member._id, `Permissions updated for ${member.name}`);
-  res.json({ message: "Permissions updated", member: safeUser(member) });
 });
 
 app.patch("/api/admin/members/:id/status", auth("admin"), async (req, res) => {
@@ -340,7 +310,7 @@ app.get("/api/admin/payments", auth("admin"), async (req, res) => {
 });
 
 app.get("/api/member/payments", auth("member"), async (req, res) => {
-  const payments = await Payment.find(req.user.permissions?.payments === "all" ? {} : { member: req.user._id })
+  const payments = await Payment.find({ member: req.user._id })
     .sort({ year: -1, month: -1 });
 
   res.json(payments);
@@ -522,23 +492,23 @@ app.get("/api/admin/summary", auth("admin"), async (req, res) => {
 
 // MEMBER OVERVIEW
 app.get("/api/member/overview", auth("member"), async (req, res) => {
-  const [payments, incomes, expenses] = await Promise.all([
-    req.user.permissions?.payments === "none" ? Promise.resolve([]) : Payment.find(req.user.permissions?.payments === "all" ? {} : { member: req.user._id }).sort({ year: -1, month: -1 }),
-    (req.user.permissions?.varavuSelavu?.view ? Income.find() : Income.find({ _id: { $exists: false } })).sort({ date: -1, createdAt: -1 }),
-    (req.user.permissions?.varavuSelavu?.view ? Expense.find() : Expense.find({ _id: { $exists: false } })).sort({ date: -1, createdAt: -1 })
+  const [myPayments, incomes, expenses, clubPaymentAgg] = await Promise.all([
+    Payment.find({ member: req.user._id }).sort({ year: -1, month: -1 }),
+    Income.find().sort({ date: -1, createdAt: -1 }),
+    Expense.find().sort({ date: -1, createdAt: -1 }),
+    Payment.aggregate([{ $group: { _id: null, total: { $sum: "$amount" } } }])
   ]);
 
-  const totalPaid = payments.reduce((s, p) => s + Number(p.amount || 0), 0);
-  const clubPaymentIncome = req.user.permissions?.payments === "all" ? await Payment.aggregate([
-    { $group: { _id: null, total: { $sum: "$amount" } } }
-  ]) : [];
+  // Pending / total paid are ALWAYS the member's own numbers.
+  const payments = myPayments;
+  const totalPaid = myPayments.reduce((s, p) => s + Number(p.amount || 0), 0);
 
-  const paymentIncome = req.user.permissions?.payments === "none" ? 0 : (req.user.permissions?.payments === "all" ? (clubPaymentIncome[0]?.total || 0) : totalPaid);
+  // Club overview (default for every member): totals only, no other member's details.
+  const paymentIncome = clubPaymentAgg[0]?.total || 0;
   const otherIncome = incomes.reduce((s, i) => s + Number(i.amount || 0), 0);
-  const canViewFinance = Boolean(req.user.permissions?.varavuSelavu?.view);
-  const totalIncome = canViewFinance ? paymentIncome + otherIncome : 0;
-  const totalExpense = canViewFinance ? expenses.reduce((s, e) => s + Number(e.amount || 0), 0) : 0;
-  const clubBalance = canViewFinance ? totalIncome - totalExpense : 0;
+  const totalIncome = paymentIncome + otherIncome;
+  const totalExpense = expenses.reduce((s, e) => s + Number(e.amount || 0), 0);
+  const clubBalance = totalIncome - totalExpense;
 
   // Calculate dues from the member's join month through current month.
   // Existing future-dated records are not counted.
@@ -611,24 +581,6 @@ const expectedAmount = expectedMonths * monthlyAmount;
     totalExpense,
     clubBalance
   });
-});
-
-// MEMBER VARAVU-SE LAVU ACTIONS (permission checked server-side)
-app.post("/api/member/incomes", auth("member"), requirePermission("add"), async (req, res) => {
-  try { const item = await Income.create({ title: req.body.title, amount: Number(req.body.amount), category: req.body.category || "General", date: req.body.date || new Date(), note: req.body.note || "" }); await writeAudit(req, "MEMBER_INCOME_CREATED", "Income", item._id, item.title); res.status(201).json(item); }
-  catch (e) { res.status(400).json({ message: e.message }); }
-});
-app.patch("/api/member/incomes/:id", auth("member"), (req, res, next) => can(req, "edit") || can(req, "update") ? next() : res.status(403).json({ message: "Permission denied by admin" }), async (req, res) => {
-  try { const item = await Income.findById(req.params.id); if (!item) return res.status(404).json({ message: "Income not found" }); if (req.body.title !== undefined) item.title = req.body.title; if (req.body.amount !== undefined) item.amount = Number(req.body.amount); if (req.body.category !== undefined) item.category = req.body.category; if (req.body.date !== undefined) item.date = req.body.date; if (req.body.note !== undefined) item.note = req.body.note; await item.save(); await writeAudit(req, "MEMBER_INCOME_UPDATED", "Income", item._id, item.title); res.json(item); }
-  catch (e) { res.status(400).json({ message: e.message }); }
-});
-app.post("/api/member/expenses", auth("member"), requirePermission("add"), async (req, res) => {
-  try { const item = await Expense.create({ title: req.body.title, amount: Number(req.body.amount), category: req.body.category || "General", date: req.body.date || new Date(), note: req.body.note || "" }); await writeAudit(req, "MEMBER_EXPENSE_CREATED", "Expense", item._id, item.title); res.status(201).json(item); }
-  catch (e) { res.status(400).json({ message: e.message }); }
-});
-app.patch("/api/member/expenses/:id", auth("member"), (req, res, next) => can(req, "edit") || can(req, "update") ? next() : res.status(403).json({ message: "Permission denied by admin" }), async (req, res) => {
-  try { const item = await Expense.findById(req.params.id); if (!item) return res.status(404).json({ message: "Expense not found" }); if (req.body.title !== undefined) item.title = req.body.title; if (req.body.amount !== undefined) item.amount = Number(req.body.amount); if (req.body.category !== undefined) item.category = req.body.category; if (req.body.date !== undefined) item.date = req.body.date; if (req.body.note !== undefined) item.note = req.body.note; await item.save(); await writeAudit(req, "MEMBER_EXPENSE_UPDATED", "Expense", item._id, item.title); res.json(item); }
-  catch (e) { res.status(400).json({ message: e.message }); }
 });
 
 // ADMIN AUDIT HISTORY

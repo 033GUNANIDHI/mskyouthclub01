@@ -298,3 +298,6 @@ tbody tr:hover { background: #f6fbfb; }
 .permission-check-grid input { width: auto; margin: 0; accent-color: #087f8c; }
 .permission-modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 22px; }
 @media(max-width:420px) { .permission-modal { padding: 17px; } .permission-check-grid { grid-template-columns: 1fr; } }
+
+.permission-hint { margin: 0 0 10px; font-size: 13px; color: #64748b; }
+.permission-check-grid input[type="checkbox"]:disabled { opacity: .7; }
