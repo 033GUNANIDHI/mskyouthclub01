@@ -816,8 +816,32 @@ function EditFinanceModal({ item, type, isOpen, onClose, onUpdated, showToast })
 }
 
 /* ==========================================================================
-   PWA Installation Hook
+   PWA Installation & Social Share Helpers
    ========================================================================== */
+async function shareApp(showToast) {
+  const url = window.location.origin;
+  const shareText = `வணக்கம் தோழர்களே! 🌟\n\nநமது MSK Youth Club அதிகாரப்பூர்வ மொபைல் போர்ட்டல் & ஆப்!\nமாத சந்தா விவரங்கள், வரவு-செலவு கணக்குகள் மற்றும் ரசீதுகளை எளிதாக பார்க்க:\n🔗 ${url}\n\n(இணைப்பை திறந்து 'Install App' கொடுத்து உங்கள் போனில் ஆப் போல வைத்துக் கொள்ளலாம்!)\n- MSK Youth Club`;
+
+  if (navigator.share) {
+    try {
+      await navigator.share({
+        title: "MSK Youth Club Portal",
+        text: shareText,
+        url: url
+      });
+      if (showToast) showToast("Link shared successfully!", "success");
+      return;
+    } catch (err) {
+      if (err.name !== "AbortError") {
+        console.log("Share failed:", err);
+      }
+    }
+  }
+
+  // Fallback directly to WhatsApp
+  window.open(`https://wa.me/?text=${encodeURIComponent(shareText)}`, "_blank");
+}
+
 function usePwaInstall() {
   const [deferredPrompt, setDeferredPrompt] = useState(null);
   const [isInstalled, setIsInstalled] = useState(false);
@@ -892,6 +916,14 @@ function Layout({ user, onLogout, showToast, children }) {
               📲 App
             </button>
           )}
+
+          <button
+            className="topbar-btn"
+            onClick={() => shareApp(showToast)}
+            title="Share App on WhatsApp, Telegram, etc."
+          >
+            📤 Share
+          </button>
 
           <button
             className="topbar-btn"
@@ -1010,6 +1042,15 @@ function Login({ onLogin, showToast }) {
             📲 Install MSK Club App on Phone
           </button>
         )}
+
+        <button
+          type="button"
+          className="wa-btn full"
+          onClick={() => shareApp(showToast)}
+          style={{ marginTop: "10px" }}
+        >
+          💬 Share App Link via WhatsApp
+        </button>
       </form>
     </div>
   );
@@ -1255,6 +1296,19 @@ function MemberDashboard({ showToast }) {
           <small>Club Current Balance</small>
           <strong>{money(data.clubBalance)}</strong>
           <span className="stat-desc">Net available funds</span>
+        </div>
+      </div>
+
+      {/* Share App Card */}
+      <div className="card" style={{ background: "linear-gradient(135deg, rgba(8,127,140,0.06), rgba(212,160,52,0.08))", border: "1px solid rgba(212,160,52,0.3)", marginTop: "20px" }}>
+        <div className="card-head" style={{ marginBottom: 0 }}>
+          <div>
+            <h3 style={{ margin: "0 0 4px", fontSize: "16px" }}>📤 Share MSK Club App with Club Members</h3>
+            <p style={{ margin: 0, fontSize: "13px" }}>Share this portal link to WhatsApp groups or friends</p>
+          </div>
+          <button className="wa-btn" onClick={() => shareApp(showToast)}>
+            💬 Share on WhatsApp
+          </button>
         </div>
       </div>
     </section>
