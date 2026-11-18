@@ -506,7 +506,7 @@ function MemberStatementModal({ member, isOpen, onClose, showToast }) {
         <p>Loading member statement...</p>
       ) : statement ? (
         <div>
-          <div className="stats" style={{ gridTemplateColumns: "repeat(4, 1fr)", marginBottom: "18px" }}>
+          <div className="stats" style={{ marginBottom: "18px" }}>
             <div className="stat stat-emerald">
               <small>Total Paid</small>
               <strong>{money(statement.totalPaid)}</strong>
@@ -657,7 +657,7 @@ function EditPaymentModal({ payment, members, isOpen, onClose, onUpdated, showTo
             ))}
           </select>
         </label>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+        <div className="form-grid-2">
           <label>
             Month
             <select value={form.month} onChange={e => setForm({ ...form, month: Number(e.target.value) })}>
@@ -2003,7 +2003,7 @@ function AdminDashboard({ showToast }) {
               </select>
             </label>
 
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+            <div className="form-grid-2">
               <label>
                 Month
                 <select

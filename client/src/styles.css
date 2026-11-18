@@ -1181,78 +1181,320 @@ tbody tr:last-child td {
 }
 
 /* ==========================================================================
-   Responsive Breakpoints
+   Responsive Breakpoints & Mobile-First Optimizations
    ========================================================================== */
+
+/* Prevent iOS Safari input auto-zoom */
+@media (max-width: 768px) {
+  input, select, textarea {
+    font-size: 16px !important;
+  }
+}
+
+.form-grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
 @media (max-width: 980px) {
   .grid2, .finance-grid, .monthly-grid {
     grid-template-columns: 1fr;
   }
 }
 
-@media (max-width: 720px) {
+@media (max-width: 768px) {
   .topbar {
-    padding: 0 14px;
-    min-height: 62px;
+    padding: 0 12px;
+    min-height: 58px;
+    gap: 8px;
   }
   .top-logo {
-    width: 38px;
-    height: 38px;
+    width: 36px;
+    height: 36px;
   }
   .brand-title {
-    font-size: 17px;
+    font-size: 16px;
+  }
+  .brand-subtitle {
+    display: none;
+  }
+  .topbar-actions {
+    gap: 6px;
+  }
+  .user-badge {
+    padding: 3px 6px;
   }
   .user-info {
     display: none;
   }
+  .user-avatar {
+    width: 26px;
+    height: 26px;
+    font-size: 12px;
+  }
+  .topbar-btn {
+    padding: 6px 9px;
+    font-size: 12px;
+  }
+  .logout-btn {
+    padding: 6px 10px;
+    font-size: 12px;
+  }
   .container {
-    padding: 18px 12px 40px;
+    padding: 14px 10px 48px;
   }
   .page-title {
     flex-direction: column;
     align-items: flex-start;
+    gap: 12px;
+    margin-bottom: 18px;
+  }
+  .page-title h1 {
+    font-size: 1.5rem;
   }
   .download-actions {
     width: 100%;
   }
   .download-actions button {
     flex: 1;
+    min-height: 40px;
   }
-  .tabs {
-    overflow-x: auto;
-    flex-wrap: nowrap;
-    padding-bottom: 6px;
+  .stats {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
   }
-  .tabs button {
-    white-space: nowrap;
+  .stat {
+    padding: 14px 12px 14px 15px;
+    border-radius: 12px;
+  }
+  .stat small {
+    font-size: 10.5px;
+    margin-bottom: 4px;
+  }
+  .stat strong {
+    font-size: 20px;
+  }
+  .stat-desc {
+    font-size: 11px;
   }
   .card {
-    padding: 18px 15px;
-    border-radius: 16px;
+    padding: 16px 13px;
+    border-radius: 14px;
+    margin-bottom: 16px;
+  }
+  .grid2, .finance-grid, .monthly-grid {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+  .tabs {
+    padding: 4px;
+    gap: 5px;
+    margin-bottom: 16px;
+    border-radius: 10px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    flex-wrap: nowrap;
+    scrollbar-width: none;
+  }
+  .tabs::-webkit-scrollbar {
+    display: none;
+  }
+  .tabs button {
+    padding: 7px 12px;
+    font-size: 12.5px;
+    white-space: nowrap;
+    flex-shrink: 0;
   }
   .monthly-selector {
     flex-direction: column;
     align-items: stretch;
+    gap: 12px;
   }
   .month-controls {
     display: grid;
     grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+  .month-controls select {
+    width: 100%;
+    min-width: 0;
   }
   .month-controls button {
-    grid-column: 1 / -1;
+    width: 100%;
+  }
+  .collection-filters {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+    padding: 12px;
+  }
+  .collection-filters label {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+  }
+  .collection-filters select {
+    flex: 1;
+    max-width: 60%;
+  }
+  .collection-total {
+    margin-left: 0;
+    text-align: left;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-top: 6px;
+    border-top: 1px solid var(--msk-line);
+    width: 100%;
+  }
+  .filter-bar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+  .search-input-wrap {
+    width: 100%;
+  }
+  .filter-select {
+    width: 100%;
+  }
+  .history-pagination {
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+  }
+  .history-pagination .button-row {
+    width: 100%;
+    justify-content: center;
   }
   .chart-row {
     grid-template-columns: 1fr;
-    gap: 8px;
+    gap: 6px;
   }
   .finance-summary {
     grid-template-columns: 1fr;
+    gap: 10px;
+  }
+  .finance-summary div {
+    padding: 14px;
+  }
+  .finance-summary strong {
+    font-size: 20px;
+  }
+  .report-buttons {
+    flex-direction: column;
   }
   .report-buttons button {
     width: 100%;
   }
+  .toast-container {
+    top: 10px;
+    right: 10px;
+    left: 10px;
+    width: auto;
+    max-width: none;
+  }
+  .toast {
+    padding: 11px 14px;
+    font-size: 12.5px;
+  }
+  /* Native bottom sheet feel for modals on mobile */
+  .modal-backdrop {
+    padding: 0;
+    align-items: flex-end;
+  }
   .modal-box {
+    width: 100% !important;
+    max-height: 90vh;
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+    margin: 0;
+    animation: slideUpMobile 0.28s cubic-bezier(0.175, 0.885, 0.32, 1.1) both;
+  }
+  .modal-header {
+    padding: 16px 18px 12px;
+  }
+  .modal-header h2 {
+    font-size: 17px;
+  }
+  .modal-body {
+    padding: 16px 18px;
+  }
+  .modal-footer {
+    padding: 12px 18px 16px;
+  }
+  .button-row {
     width: 100%;
-    margin: 10px;
+  }
+  .button-row button {
+    flex: 1;
+  }
+}
+
+@keyframes slideUpMobile {
+  from { transform: translateY(100%); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+/* Small Smartphone Screen (<= 420px) */
+@media (max-width: 420px) {
+  .brand-title {
+    font-size: 15px;
+  }
+  .top-logo {
+    width: 32px;
+    height: 32px;
+  }
+  .topbar-btn {
+    padding: 5px 8px;
+    font-size: 11px;
+  }
+  .logout-btn {
+    padding: 5px 8px;
+    font-size: 11px;
+  }
+  .stats {
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+  .stat {
+    padding: 11px 10px 11px 13px;
+  }
+  .stat strong {
+    font-size: 17px;
+  }
+  .form-grid-2 {
+    grid-template-columns: 1fr;
+  }
+  .month-controls {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+  }
+  .month-controls select, .month-controls button {
+    width: 100%;
+  }
+  table th, table td {
+    padding: 9px 8px;
+    font-size: 12px;
+  }
+  .badge {
+    font-size: 10px;
+    padding: 2px 6px;
+  }
+  .btn-sm {
+    padding: 4px 7px;
+    font-size: 11px;
+  }
+  .login-card {
+    padding: 26px 18px;
+    border-radius: 20px;
+  }
+  .login-logo {
+    width: 76px;
+    height: 76px;
   }
 }
 
