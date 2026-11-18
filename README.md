@@ -1,76 +1,94 @@
-# MSK Youth Club - Full Updated Version
+# MSK Youth Club - Modern Full-Featured Version 3.0
 
-## Included
-- Admin and Member login
-- Add member with monthly contribution amount
-- Month-wise paid/pending list
-- Member pending amount and pending months
-- Monthly collection
-- Varavu / Income add, edit, delete
-- Selavu / Expense add, edit, delete
-- Club total income, expense and balance
-- Member can view club Varavu/Selavu and totals
-- Member payment history
-- Excel and PDF reports
-- Mobile responsive UI
-- MongoDB + Express + React + JWT
+Professional web portal for MSK Youth Club to manage club members, monthly subscription collections, additional Varavu (income), Selavu (expenses), detailed statements, and reports.
 
-## Setup
+---
 
-1. Install Node.js.
-2. Copy `server/.env.example` to `server/.env` (the `.env` file must be inside the `server` folder).
-3. Set `MONGO_URI` in `server/.env`.
-   - **MongoDB Atlas:** In Atlas, open your cluster > Connect > Drivers and copy the current connection string. Replace `<db_password>` with the password for a **Database Access** user (not your Atlas website login). Do not include the angle brackets. If the password contains characters such as `@`, `:`, `/`, `?`, `#`, or `%`, URL-encode them. Confirm the hostname matches the URI copied from Atlas.
-   - In Atlas **Network Access**, allow your current public IP address. Do not use `0.0.0.0/0` permanently unless you understand the security risk.
-   - If the error says `querySrv ECONNREFUSED`, it usually indicates a DNS/network issue before authentication. Check internet access, try another network, VPN/proxy settings, or a different DNS resolver. In PowerShell you can test the SRV record with `nslookup -type=SRV _mongodb._tcp.cluster0.pp0g4fw.mongodb.net`. Use the exact cluster hostname from your own Atlas URI.
-   - **Local MongoDB:** use `MONGO_URI=mongodb://127.0.0.1:27017/msk-youth-club` and make sure the local MongoDB service is running.
-   The server also accepts `MONGODB_URI` or `MONGO_URL`.
-4. From project root:
+## 🌟 Key Features & Updates
 
-```bash
-npm install
-npm run install:all
-npm run dev
+### 1. 🟢 One-Click WhatsApp Integration
+- **WhatsApp Reminder for Pending Dues**: In Admin > Overview > Monthly Collection Status, admins can click the **🟢 WhatsApp** button next to any pending member to instantly launch WhatsApp with a pre-filled, personalized reminder in Tamil & English:
+  `வணக்கம் [Member], MSK Youth Club [Month] [Year] மாத சந்தா பாக்கி தொகை ₹[Amount] செலுத்த வேண்டியுள்ளது. நன்றி!`
+- **WhatsApp Payment Receipts**: In Admin > Collections, click **💬 WhatsApp** to instantly send the payment receipt details directly to the member's mobile number.
+
+### 2. 📋 Comprehensive Member Management & Statements
+- **Member Edit Profile**: Admins can edit member Name, Email, Phone, and Monthly Contribution Fee, and reset the member's password directly from the UI.
+- **Member Account Statement**: Click **Statement** on any member to view their lifetime dues, pending months breakdown, and complete payment history, with one-click **PDF Statement Download** and WhatsApp share.
+- **Member Directory Filter & Search**: Instant live search by name, email, or phone number, with Active/Inactive filters.
+
+### 3. 💳 Advanced Payment & Collection Management
+- **Searchable Collection History**: Filter payments by month, year, and search by member name or phone.
+- **Official PDF Payment Receipts**: Generates a verified MSK Youth Club receipt with receipt number, period, payment date, and authorized management footer.
+- **Delete & Edit Payments**: Admins can modify past records or delete erroneous payments with full audit tracking.
+- **Monthly Target Progress Bar**: Displays live progress indicator of collected funds vs total expected monthly dues.
+
+### 4. 💰 Varavu (Income) & 💸 Selavu (Expense) Management
+- Full category tracking (Donation, Event, Maintenance, Sports, Ground, etc.).
+- Live search by title or notes + category filtering.
+- Dynamic total sum recalculation for filtered results.
+- Edit and delete actions with confirmation dialogs.
+
+### 5. 👥 Member Self-Service Portal
+- Personalized welcome dashboard with key stat metrics.
+- Visual Contribution Clearance progress bar (% dues cleared).
+- Month-by-month pending dues table.
+- My Payment History with individual PDF receipt downloads for every past payment.
+- Full transparency into club finances (Total Varavu, Selavu, and Balance).
+
+### 6. 🔒 Security & User Experience
+- **🔑 Change Password Modal**: Available in the top navigation bar for both Admin and Members.
+- **✨ Animated Toast Notifications**: Replaces disruptive static banners with smooth, floating auto-dismissing toast alerts (Success, Error, Info).
+- **🎨 Modern Luxury Navy, Gold & Teal Glassmorphism**: Smooth tab transitions, micro-interactions, hover effects, modal zoom animations, and responsive mobile layout.
+
+---
+
+## 🚀 Setup & Local Development
+
+### 1. Requirements
+- Node.js (v18+)
+- MongoDB Atlas or Local MongoDB
+
+### 2. Server Configuration
+Verify `server/.env`:
+```env
+PORT=4000
+MONGO_URI=your_mongodb_connection_string
+JWT_SECRET=your_secret_key_at_least_32_characters
+ADMIN_EMAIL=admin@mskyouthclub.local
+ADMIN_PASSWORD=your_secure_password
 ```
 
-Frontend: http://localhost:5173
-Backend: http://localhost:4000
+### 3. Client Configuration
+Verify `client/.env`:
+```env
+VITE_API_URL=https://mskyouthclub01-1.onrender.com
+# For local server development:
+# VITE_API_URL=http://localhost:4000
+```
 
-Default admin from the example `.env`:
-Email: admin@mskyouthclub.local
-Password: 123456
+### 4. Running Locally
+From the project root:
+```bash
+# Install dependencies
+npm run install:all
 
-Change the password before using the application seriously.
+# Start both backend and frontend concurrently
+npm run dev
+```
+- Frontend: `http://localhost:5173`
+- Backend API: `http://localhost:4000`
 
-## Finance logic
+---
 
-Member monthly payment is stored separately as a Payment.
-Admin-entered additional Varavu is stored in Income.
-Admin-entered Selavu is stored in Expense.
+## 🚢 Deploy to Production
 
-Club total Varavu =
-member payment collection + additional Varavu.
-
-Club balance =
-total Varavu - total Selavu.
-
-Member pending amount =
-expected monthly contribution from the member's join month through the current month minus the member's recorded payments.
-
-
-### Latest UI update
-- Added the provided MSK Youth Club logo to the login page, top navigation, and browser favicon.
-- Added a more distinctive gold/navy visual style while keeping the mobile-responsive layout.
-
-
-## Latest payment updates
-- Admin can edit an existing payment from Admin > Payments > Collection History. Member, month, year, amount, paid date and note can be updated. Setting the amount to ₹0 makes that month pending again.
-- Member dashboard includes a month-wise pending table with monthly fee, amount paid, balance and status.
-- A month with no payment or a ₹0 payment is counted as pending, including when the member's configured monthly amount is ₹0.
-
-## Deploy the update
-1. Replace the corresponding project files with these updated files and test locally.
-2. Push the changes to GitHub (`git add .`, `git commit -m "Add payment editing and month-wise pending dues"`, `git push`).
-3. Render: deploy the updated `server` service from the connected GitHub repository. No new environment variable is required.
-4. Vercel: deploy the updated frontend from the same repository (Root Directory: `client`). Keep `VITE_API_URL` set to `https://mskyouthclub01-1.onrender.com` if that is your active Render backend.
-5. Test an existing payment by editing its amount to 0, then log in as that member and verify the month appears in Month-wise Pending Payments.
+1. **GitHub**:
+   ```bash
+   git add .
+   git commit -m "Upgrade to v3.0: Add WhatsApp reminders, member statements, password change, and smooth UI animations"
+   git push origin main
+   ```
+2. **Render (Backend)**:
+   Deploy the updated `server` repository.
+3. **Vercel (Frontend)**:
+   Trigger a new deployment or push to main. Ensure `VITE_API_URL` points to your active Render backend service.

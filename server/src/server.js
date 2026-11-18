@@ -10,7 +10,9 @@ dotenv.config();
 const app = express();
 const allowedOrigins = (process.env.CLIENT_ORIGIN || "").split(",").map(v => v.trim()).filter(Boolean);
 app.use(cors({ origin(origin, callback) {
-  if (!origin || allowedOrigins.length === 0 || allowedOrigins.includes(origin)) return callback(null, true);
+  if (!origin || allowedOrigins.length === 0 || allowedOrigins.includes(origin) || /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
+    return callback(null, true);
+  }
   return callback(new Error("Origin not allowed by CORS"));
 } }));
 app.use(express.json({ limit: "1mb" }));
@@ -156,6 +158,32 @@ app.get("/api/me", auth(), async (req, res) => {
   res.json({ user: safeUser(req.user) });
 });
 
+app.post("/api/auth/change-password", auth(), async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ message: "Current and new password are required" });
+    }
+    if (newPassword.length < 6) {
+      return res.status(400).json({ message: "New password must be at least 6 characters" });
+    }
+
+    const user = await User.findById(req.user._id);
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    const ok = await bcrypt.compare(currentPassword, user.password);
+    if (!ok) return res.status(400).json({ message: "Incorrect current password" });
+
+    user.password = await bcrypt.hash(newPassword, 10);
+    await user.save();
+
+    await writeAudit(req, "PASSWORD_CHANGED", "User", user._id, `Password changed for ${user.email}`);
+    res.json({ message: "Password updated successfully" });
+  } catch (e) {
+    res.status(500).json({ message: e.message });
+  }
+});
+
 
 // ADMIN MEMBERS
 app.get("/api/admin/members", auth("admin"), async (req, res) => {
@@ -208,7 +236,13 @@ app.patch("/api/admin/members/:id", auth("admin"), async (req, res) => {
     });
     if (!member) return res.status(404).json({ message: "Member not found" });
 
-    const { name, phone, monthlyAmount, password } = req.body;
+    const { name, email, phone, monthlyAmount, password } = req.body;
+    if (email && email.toLowerCase().trim() !== member.email) {
+      const normalizedEmail = email.toLowerCase().trim();
+      const existing = await User.findOne({ email: normalizedEmail, _id: { $ne: member._id } });
+      if (existing) return res.status(409).json({ message: "Email already in use by another user" });
+      member.email = normalizedEmail;
+    }
     if (name !== undefined) member.name = name;
     if (phone !== undefined) member.phone = phone;
     if (monthlyAmount !== undefined) member.monthlyAmount = Number(monthlyAmount || 0);
@@ -240,6 +274,60 @@ app.delete("/api/admin/members/:id", auth("admin"), async (req, res) => {
   await member.save();
   await writeAudit(req, "MEMBER_ARCHIVED", "Member", member._id, `Archived ${member.name}; payment history preserved`);
   res.json({ message: "Member archived; payment history preserved", member: safeUser(member) });
+});
+
+// MEMBER STATEMENT FOR ADMIN
+app.get("/api/admin/members/:id/statement", auth("admin"), async (req, res) => {
+  try {
+    const member = await User.findOne({ _id: req.params.id, role: "member" }).select("-password");
+    if (!member) return res.status(404).json({ message: "Member not found" });
+
+    const payments = await Payment.find({ member: member._id }).sort({ year: -1, month: -1 });
+    const totalPaid = payments.reduce((s, p) => s + Number(p.amount || 0), 0);
+
+    const now = new Date();
+    const joined = new Date(member.joinedAt);
+    const startYear = joined.getFullYear();
+    const startMonth = joined.getMonth() + 1;
+    const endYear = now.getFullYear();
+    const endMonth = now.getMonth() + 1;
+
+    let cursorYear = startYear;
+    let cursorMonth = startMonth;
+    let checkedMonths = 0;
+    const paymentByMonth = new Map(payments.map(p => [`${p.year}-${p.month}`, Number(p.amount || 0)]));
+    const pendingMonthList = [];
+    const monthlyAmount = Number(member.monthlyAmount || 0);
+
+    while (cursorYear < endYear || (cursorYear === endYear && cursorMonth <= endMonth)) {
+      const key = `${cursorYear}-${cursorMonth}`;
+      const amountPaidForMonth = paymentByMonth.get(key) || 0;
+      if (amountPaidForMonth <= 0 || (monthlyAmount > 0 && amountPaidForMonth < monthlyAmount)) {
+        pendingMonthList.push({
+          month: cursorMonth,
+          year: cursorYear,
+          monthlyAmount,
+          paidAmount: amountPaidForMonth,
+          remainingAmount: Math.max(monthlyAmount - amountPaidForMonth, 0)
+        });
+      }
+      cursorMonth++;
+      if (cursorMonth === 13) { cursorMonth = 1; cursorYear++; }
+      if (++checkedMonths > 240) break;
+    }
+    const pendingAmount = pendingMonthList.reduce((sum, item) => sum + item.remainingAmount, 0);
+
+    res.json({
+      member: safeUser(member),
+      payments,
+      totalPaid,
+      pendingAmount,
+      pendingMonths: pendingMonthList.length,
+      pendingMonthList
+    });
+  } catch (e) {
+    res.status(500).json({ message: e.message });
+  }
 });
 
 // MONTHLY PAYMENTS
@@ -297,6 +385,27 @@ app.patch("/api/admin/payments/:id", auth("admin"), async (req, res) => {
     res.status(500).json({
       message: "Failed to update payment"
     });
+  }
+});
+
+app.delete("/api/admin/payments/:id", auth("admin"), async (req, res) => {
+  try {
+    const payment = await Payment.findById(req.params.id).populate("member", "name");
+    if (!payment) return res.status(404).json({ message: "Payment record not found" });
+
+    await Payment.findByIdAndDelete(req.params.id);
+    await writeAudit(
+      req,
+      "PAYMENT_DELETED",
+      "Payment",
+      payment._id,
+      `Deleted payment for ${payment.member?.name || "member"} (${payment.month}/${payment.year}) amount ₹${payment.amount}`
+    );
+
+    res.json({ message: "Payment deleted successfully" });
+  } catch (error) {
+    console.error("Payment deletion failed:", error);
+    res.status(500).json({ message: "Failed to delete payment" });
   }
 });
 
