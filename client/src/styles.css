@@ -345,6 +345,19 @@ label {
   padding: 8px 12px;
 }
 
+.install-btn {
+  background: linear-gradient(135deg, rgba(212, 160, 52, 0.25), rgba(8, 127, 140, 0.3));
+  border-color: rgba(212, 160, 52, 0.5);
+  color: var(--msk-gold-light);
+  font-weight: 700;
+  animation: pulseGold 2.2s infinite;
+}
+
+@keyframes pulseGold {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(212, 160, 52, 0.4); }
+  50% { box-shadow: 0 0 0 5px rgba(212, 160, 52, 0); }
+}
+
 .topbar-btn:hover {
   background: rgba(255, 255, 255, 0.2);
   color: #fff;

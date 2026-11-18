@@ -816,10 +816,52 @@ function EditFinanceModal({ item, type, isOpen, onClose, onUpdated, showToast })
 }
 
 /* ==========================================================================
+   PWA Installation Hook
+   ========================================================================== */
+function usePwaInstall() {
+  const [deferredPrompt, setDeferredPrompt] = useState(null);
+  const [isInstalled, setIsInstalled] = useState(false);
+
+  useEffect(() => {
+    if (window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone) {
+      setIsInstalled(true);
+    }
+
+    const handler = (e) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    };
+
+    window.addEventListener("beforeinstallprompt", handler);
+    window.addEventListener("appinstalled", () => {
+      setIsInstalled(true);
+      setDeferredPrompt(null);
+    });
+
+    return () => window.removeEventListener("beforeinstallprompt", handler);
+  }, []);
+
+  async function install() {
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      const choice = await deferredPrompt.userChoice;
+      if (choice.outcome === "accepted") {
+        setDeferredPrompt(null);
+      }
+    } else {
+      alert("📲 MSK Club App-ஐ Install செய்ய:\n\n• Android Chrome: மூன்று புள்ளிகளை (⋮) தொட்டு 'Add to Home Screen' அல்லது 'Install App' கொடுக்கவும்.\n\n• iPhone Safari: கீழே உள்ள Share (⎋) ஐகானை தொட்டு 'Add to Home Screen' (+) கொடுக்கவும்.");
+    }
+  }
+
+  return { install, canInstall: !isInstalled, isInstalled };
+}
+
+/* ==========================================================================
    Header & Navigation
    ========================================================================== */
 function Layout({ user, onLogout, showToast, children }) {
   const [pwModal, setPwModal] = useState(false);
+  const { install, canInstall } = usePwaInstall();
 
   return (
     <>
@@ -840,6 +882,16 @@ function Layout({ user, onLogout, showToast, children }) {
               <span className="role-pill">{user.role}</span>
             </div>
           </div>
+
+          {canInstall && (
+            <button
+              className="topbar-btn install-btn"
+              onClick={install}
+              title="Install MSK Club App on your device"
+            >
+              📲 App
+            </button>
+          )}
 
           <button
             className="topbar-btn"
@@ -873,6 +925,7 @@ function Login({ onLogin, showToast }) {
   const [form, setForm] = useState({ email: "", password: "" });
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const { install, canInstall } = usePwaInstall();
 
   async function submit(e) {
     e.preventDefault();
@@ -946,6 +999,17 @@ function Login({ onLogin, showToast }) {
         <button className="primary full" type="submit" disabled={loading} style={{ marginTop: "16px" }}>
           {loading ? "Signing in..." : "Sign In to MSK Youth Club"}
         </button>
+
+        {canInstall && (
+          <button
+            type="button"
+            className="secondary full"
+            onClick={install}
+            style={{ marginTop: "10px", borderColor: "rgba(212, 160, 52, 0.4)", color: "var(--msk-navy)", fontWeight: 650 }}
+          >
+            📲 Install MSK Club App on Phone
+          </button>
+        )}
       </form>
     </div>
   );
